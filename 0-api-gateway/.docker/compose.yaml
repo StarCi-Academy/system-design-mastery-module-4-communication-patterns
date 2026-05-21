@@ -1,0 +1,170 @@
+# Kiến trúc: Stack Docker lesson: api gateway.
+# (EN: Docker stack for lesson: api gateway.)
+#
+# Demo: HTTP API cổng 3000 (hoặc theo compose); xem README module.
+#
+# Thư mục làm việc: 0-api-gateway/.docker
+# (EN: Working directory: 0-api-gateway/.docker)
+#
+# Khởi chạy stack:
+# (EN: Start stack:)
+#   cd 0-api-gateway/.docker && docker compose up -d --build
+#
+# Xem log:
+# (EN: View logs:)
+#   docker compose logs -f
+#
+# Dọn dẹp:
+# (EN: Cleanup:)
+#   docker compose down -v
+#
+# Docker Compose — lesson `0-api-gateway` (Kong Gateway + 3 NestJS backends).
+# (EN: Docker Compose — lesson `0-api-gateway` (Kong Gateway + 3 NestJS backends).)
+#
+# Làm việc trong thư mục chứa file này: `.../0-api-gateway/.docker/`
+# (EN: Run commands from this file's directory: `.../0-api-gateway/.docker/`)
+#
+# Compose tự tạo network `0-api-gateway` khi `up` (không cần `docker network create`).
+# (EN: Compose creates network `0-api-gateway` on `up` (no manual `docker network create`).)
+#
+# Khởi chạy nền + build image trong compose (nếu có `build:`):
+# (EN: Start detached + build images defined in compose (when `build:` is present).)
+#     docker compose up -d --build
+#
+# Xem log Kong / backend:
+# (EN: Tail Kong / backend logs.)
+#     docker compose logs -f kong
+#     docker compose logs -f user-service
+#
+# Dừng và gỡ container + volume:
+# (EN: Stop/remove containers + volumes.)
+#     docker compose down -v
+# =============================================================================
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 0-api-gateway
+
+services:
+  # PostgreSQL — persistence cho Kong (routing config, plugin, upstream).
+  # (EN: PostgreSQL — persistence for Kong (routing config, plugin, upstream).)
+  kong-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Cuong123_A
+      POSTGRES_DB: kong
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kong"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - "0-api-gateway"
+    restart: unless-stopped
+
+  # Kong Migrations — khởi tạo schema database cho Kong (chạy 1 lần).
+  # (EN: Kong Migrations — initializes Kong database schema (runs once).)
+  kong-migrations:
+    image: kong:latest
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_USER: postgres
+      KONG_PG_PASSWORD: Cuong123_A
+      KONG_PG_DATABASE: kong
+    networks:
+      - "0-api-gateway"
+    command: >
+      sh -c "
+      kong migrations bootstrap && 
+      kong migrations up && 
+      kong migrations finish
+      "
+
+  # Kong Gateway — reverse proxy chính, nhận request client (:8000) và Admin API (:8001).
+  # (EN: Kong Gateway — main reverse proxy, receives client requests (:8000) and Admin API (:8001).)
+  kong:
+    image: kong:latest
+    depends_on:
+      kong-db:
+        condition: service_healthy
+      kong-migrations:
+        condition: service_completed_successfully
+    ports:
+      # Ánh xạ cổng host 8000 → Kong Proxy (client traffic).
+      # (EN: Map host port 8000 → Kong Proxy (client traffic).)
+      - "8000:8000"
+      # Ánh xạ cổng host 8001 → Kong Admin API (cấu hình routing).
+      # (EN: Map host port 8001 → Kong Admin API (routing configuration).)
+      - "8001:8001"
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_USER: postgres
+      KONG_PG_PASSWORD: Cuong123_A
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    networks:
+      - "0-api-gateway"
+    restart: unless-stopped
+
+  # Konga — GUI web quản lý Kong, kết nối Admin API.
+  # (EN: Konga — web GUI for managing Kong, connects to Admin API.)
+  konga:
+    image: pantsel/konga:latest
+    depends_on:
+      - kong
+    ports:
+      # Ánh xạ cổng host 1337 → Konga GUI.
+      # (EN: Map host port 1337 → Konga GUI.)
+      - "1337:1337"
+    environment:
+      NODE_ENV: production
+    networks:
+      - "0-api-gateway"
+    restart: unless-stopped
+
+  # User Service — backend NestJS trả dữ liệu user mock từ bộ nhớ.
+  # (EN: User Service — NestJS backend returning mock user data from memory.)
+  user-service:
+    image: starciacademy/communication-patterns-api-gateway-user:latest
+    ports:
+      # Ánh xạ cổng host 3001 → container 3001 (HTTP API).
+      # (EN: Map host port 3001 → container 3001 (HTTP API).)
+      - "3001:3001"
+    restart: unless-stopped
+    networks:
+      - "0-api-gateway"
+
+  # Product Service — backend NestJS trả dữ liệu product mock từ bộ nhớ.
+  # (EN: Product Service — NestJS backend returning mock product data from memory.)
+  product-service:
+    image: starciacademy/communication-patterns-api-gateway-product:latest
+    ports:
+      # Ánh xạ cổng host 3002 → container 3002 (HTTP API).
+      # (EN: Map host port 3002 → container 3002 (HTTP API).)
+      - "3002:3002"
+    restart: unless-stopped
+    networks:
+      - "0-api-gateway"
+
+  # Order Service — backend NestJS trả dữ liệu order mock từ bộ nhớ.
+  # (EN: Order Service — NestJS backend returning mock order data from memory.)
+  order-service:
+    image: starciacademy/communication-patterns-api-gateway-order:latest
+    ports:
+      # Ánh xạ cổng host 3003 → container 3003 (HTTP API).
+      # (EN: Map host port 3003 → container 3003 (HTTP API).)
+      - "3003:3003"
+    restart: unless-stopped
+    networks:
+      - "0-api-gateway"
+
+# Network do Compose tạo; `name` đặt tên trên Docker trùng lesson (không `external`).
+# (EN: Compose-managed network; `name` sets Docker network name to match lesson (not `external`).)
+networks:
+  "0-api-gateway":
+    name: "0-api-gateway"

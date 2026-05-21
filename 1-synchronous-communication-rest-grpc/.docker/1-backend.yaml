@@ -1,0 +1,35 @@
+services:
+  gateway:
+    image: starciacademy/communication-patterns-sync-grpc-gateway:latest
+    container_name: sync-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      USER_SERVICE_URL: user-service:5001
+      PRODUCT_SERVICE_URL: product-service:5002
+    restart: unless-stopped
+    networks:
+      - starci-network
+
+  user-service:
+    image: starciacademy/communication-patterns-sync-grpc-user:latest
+    container_name: sync-user
+    expose:
+      - "5001"
+    restart: unless-stopped
+    networks:
+      - starci-network
+
+  product-service:
+    image: starciacademy/communication-patterns-sync-grpc-product:latest
+    container_name: sync-product
+    expose:
+      - "5002"
+    restart: unless-stopped
+    networks:
+      - starci-network
+
+networks:
+  starci-network:
+    external: true
+    name: starci-network
