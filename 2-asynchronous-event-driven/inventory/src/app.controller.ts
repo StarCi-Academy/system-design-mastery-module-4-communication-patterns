@@ -1,17 +1,24 @@
-/**
- * HTTP/Kafka controller — routes delegate to service.
- * (EN: Controller — routes delegate to service.)
- */
-}
+import {
+    Controller,
+    Logger,
+} from "@nestjs/common"
+import {
+    EventPattern,
+    Payload,
+} from "@nestjs/microservices"
+import {
+    AppService,
+} from "./app.service"
 
-    /**
-     * Logic — nhận event `order-events` từ Kafka, gọi service cập nhật tồn kho.
-     * Code — `@EventPattern` lắng nghe topic, `@Payload()` trích payload message.
-     * (EN Logic: Receives `order-events` from Kafka, calls service to update stock.)
-     * (EN Code: `@EventPattern` listens on topic, `@Payload()` extracts message payload.)
-     */
+@Controller()
+export class AppController {
+    private readonly logger = new Logger(AppController.name)
+
+    constructor(private readonly appService: AppService) {}
+
     @EventPattern("order-events")
-    handleOrderCreated(@Payload() data) {
+    handleOrderCreated(@Payload() data: Record<string, unknown>) {
         this.logger.log(`Received ORDER_CREATED event: ${JSON.stringify(data)}`)
         this.appService.updateStock(data)
     }
+}

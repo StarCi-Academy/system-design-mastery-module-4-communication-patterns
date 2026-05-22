@@ -130,11 +130,13 @@ services:
   # User Service — backend NestJS trả dữ liệu user mock từ bộ nhớ.
   # (EN: User Service — NestJS backend returning mock user data from memory.)
   user-service:
-    image: starciacademy/communication-patterns-api-gateway-user:latest
+    image: starciacademy/system-design-api-gateway-user-service:latest
     ports:
       # Ánh xạ cổng host 3001 → container 3001 (HTTP API).
       # (EN: Map host port 3001 → container 3001 (HTTP API).)
       - "3001:3001"
+    environment:
+      PORT: 3001
     restart: unless-stopped
     networks:
       - "0-api-gateway"
@@ -142,11 +144,13 @@ services:
   # Product Service — backend NestJS trả dữ liệu product mock từ bộ nhớ.
   # (EN: Product Service — NestJS backend returning mock product data from memory.)
   product-service:
-    image: starciacademy/communication-patterns-api-gateway-product:latest
+    image: starciacademy/system-design-api-gateway-product-service:latest
     ports:
       # Ánh xạ cổng host 3002 → container 3002 (HTTP API).
       # (EN: Map host port 3002 → container 3002 (HTTP API).)
       - "3002:3002"
+    environment:
+      PORT: 3002
     restart: unless-stopped
     networks:
       - "0-api-gateway"
@@ -154,11 +158,13 @@ services:
   # Order Service — backend NestJS trả dữ liệu order mock từ bộ nhớ.
   # (EN: Order Service — NestJS backend returning mock order data from memory.)
   order-service:
-    image: starciacademy/communication-patterns-api-gateway-order:latest
+    image: starciacademy/system-design-api-gateway-order-service:latest
     ports:
       # Ánh xạ cổng host 3003 → container 3003 (HTTP API).
       # (EN: Map host port 3003 → container 3003 (HTTP API).)
       - "3003:3003"
+    environment:
+      PORT: 3003
     restart: unless-stopped
     networks:
       - "0-api-gateway"

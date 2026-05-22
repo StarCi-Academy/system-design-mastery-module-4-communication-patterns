@@ -29,7 +29,7 @@ export async function bootstrap(): Promise<void> {
             // Package khớp với `package product;` trong `product.proto`.
             // (EN: Package matches `package product;` in `product.proto`.)
             package: "product",
-            protoPath: join(__dirname, "../proto/product.proto"),
+            protoPath: join(__dirname, "../.proto/product.proto"),
             // Lắng nghe trên mọi interface để container map được cổng.
             // (EN: Listen on all interfaces so Docker port mapping works.)
             url: "0.0.0.0:5002",

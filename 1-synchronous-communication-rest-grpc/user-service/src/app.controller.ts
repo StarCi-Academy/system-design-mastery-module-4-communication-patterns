@@ -1,22 +1,23 @@
-/**
- * HTTP/Kafka controller — routes delegate to service.
- * (EN: Controller — routes delegate to service.)
- */
-}
+import {
+    Controller,
+    Logger,
+} from "@nestjs/common"
+import {
+    GrpcMethod,
+} from "@nestjs/microservices"
+import {
+    AppService,
+} from "./app.service"
 
-    /**
-     * Logic — nhận request gRPC `GetUser`, trả user từ bộ nhớ.
-     * Code — `@GrpcMethod` map tới `UserService.GetUser` trong proto.
-     * (EN Logic: Receives gRPC `GetUser` request, returns user from memory.)
-     * (EN Code: `@GrpcMethod` maps to `UserService.GetUser` in proto.)
-     */
-    @GrpcMethod("UserService", "GetUser")/**
- * Logic — Đọc/truy vấn dữ liệu qua `getUser`.
- * Code — Truy vấn in-memory / DB / cache và map response DTO.
- * (EN Logic: Read/query via `getUser`.)
- * (EN Code: Query in-memory / DB / cache and map response.)
- */
+@Controller()
+export class AppController {
+    private readonly logger = new Logger(AppController.name)
+
+    constructor(private readonly appService: AppService) {}
+
+    @GrpcMethod("UserService", "GetUser")
     getUser(data: { id: number }) {
         this.logger.log(`gRPC GetUser id=${data.id}`)
         return this.appService.getUser(data.id)
     }
+}

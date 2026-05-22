@@ -40,7 +40,7 @@ import {
                 transport: Transport.GRPC,
                 options: {
                     package: "user",
-                    protoPath: join(__dirname, "..", "proto", "user.proto"),
+                    protoPath: join(__dirname, "..", ".proto", "user.proto"),
                     url: process.env.USER_GRPC_URL || "user-service:5001",
                 },
             },
@@ -51,7 +51,7 @@ import {
                 transport: Transport.GRPC,
                 options: {
                     package: "product",
-                    protoPath: join(__dirname, "..", "proto", "product.proto"),
+                    protoPath: join(__dirname, "..", ".proto", "product.proto"),
                     url: process.env.PRODUCT_GRPC_URL || "product-service:5002",
                 },
             },

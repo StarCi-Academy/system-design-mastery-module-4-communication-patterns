@@ -125,7 +125,7 @@ services:
   # (EN: Order Service (Producer) — REST API for POST /orders, emits Kafka event.)
   # ──────────────────────────────────────────────
   order-service:
-    image: starciacademy/asynchronous-event-driven-order:latest
+    image: starciacademy/system-design-asynchronous-event-driven-order-service:latest
     container_name: order-service
     ports:
       # REST API cho client gọi tạo đơn hàng.
@@ -144,7 +144,7 @@ services:
   # (EN: Inventory Consumer — listens on `order-events` topic, updates stock.)
   # ──────────────────────────────────────────────
   inventory-service:
-    image: starciacademy/asynchronous-event-driven-inventory:latest
+    image: starciacademy/system-design-asynchronous-event-driven-inventory-service:latest
     container_name: inventory-service
     environment:
       KAFKA_BROKERS: kafka:9092
@@ -157,7 +157,7 @@ services:
   # (EN: Notification Consumer — listens on `order-events` topic, sends notification.)
   # ──────────────────────────────────────────────
   notification-service:
-    image: starciacademy/asynchronous-event-driven-notification:latest
+    image: starciacademy/system-design-asynchronous-event-driven-notification-service:latest
     container_name: notification-service
     environment:
       KAFKA_BROKERS: kafka:9092

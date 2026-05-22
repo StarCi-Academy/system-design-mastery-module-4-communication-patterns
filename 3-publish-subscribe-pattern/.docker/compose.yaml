@@ -70,7 +70,7 @@ services:
   # (EN: Publisher Service — REST API for POST /publish, emits event to NATS.)
   # ──────────────────────────────────────────────
   publisher-service:
-    image: starciacademy/publish-subscribe-pattern-publisher-service:latest
+    image: starciacademy/system-design-publish-subscribe-pattern-publisher-service:latest
     container_name: publisher-service
     ports:
       # REST API cho client gọi publish event.
@@ -89,7 +89,7 @@ services:
   # (EN: Subscriber Analytics — receives `app.events`, updates analytics/metrics.)
   # ──────────────────────────────────────────────
   subscriber-analytics:
-    image: starciacademy/publish-subscribe-pattern-subscriber-analytics:latest
+    image: starciacademy/system-design-publish-subscribe-pattern-subscriber-analytics:latest
     container_name: subscriber-analytics
     environment:
       NATS_URL: nats://nats:4222
@@ -102,7 +102,7 @@ services:
   # (EN: Subscriber Audit — receives `app.events`, writes to audit log.)
   # ──────────────────────────────────────────────
   subscriber-audit:
-    image: starciacademy/publish-subscribe-pattern-subscriber-audit:latest
+    image: starciacademy/system-design-publish-subscribe-pattern-subscriber-audit:latest
     container_name: subscriber-audit
     environment:
       NATS_URL: nats://nats:4222
@@ -115,7 +115,7 @@ services:
   # (EN: Subscriber Notification — receives `app.events`, sends email/push.)
   # ──────────────────────────────────────────────
   subscriber-notification:
-    image: starciacademy/publish-subscribe-pattern-subscriber-notification:latest
+    image: starciacademy/system-design-publish-subscribe-pattern-subscriber-notification:latest
     container_name: subscriber-notification
     environment:
       NATS_URL: nats://nats:4222

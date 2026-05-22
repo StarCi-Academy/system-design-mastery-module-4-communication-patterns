@@ -44,10 +44,7 @@ interface ProductGrpc {/**
     getProduct(data: { id: number }): Observable<{ id: number; name: string; price: number }>
 }
 
-/**
- * Class `AppController` — thành phần lab (controller/service/module).
- * (EN: Class `AppController` — lesson lab component.)
- */
+@Controller()
 export class AppController implements OnModuleInit {
     private readonly logger = new Logger(AppController.name)
     private userSvc!: UserGrpc

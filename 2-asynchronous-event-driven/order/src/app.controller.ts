@@ -1,17 +1,22 @@
-/**
- * HTTP/Kafka controller — routes delegate to service.
- * (EN: Controller — routes delegate to service.)
- */
-}
+import {
+    Body,
+    Controller,
+    Logger,
+    Post,
+} from "@nestjs/common"
+import {
+    AppService,
+} from "./app.service"
 
-    /**
-     * Logic — nhận POST /orders từ client, gọi service tạo đơn + emit event.
-     * Code — `@Post()` map REST endpoint, uỷ thác logic cho `AppService.createOrder`.
-     * (EN Logic: Receives POST /orders from client, calls service to create order + emit event.)
-     * (EN Code: `@Post()` maps REST endpoint, delegates to `AppService.createOrder`.)
-     */
+@Controller("orders")
+export class AppController {
+    private readonly logger = new Logger(AppController.name)
+
+    constructor(private readonly appService: AppService) {}
+
     @Post()
-    async createOrder(@Body() orderData) {
+    async createOrder(@Body() orderData: Record<string, unknown>) {
         this.logger.log("Received request to create order")
         return this.appService.createOrder(orderData)
     }
+}
