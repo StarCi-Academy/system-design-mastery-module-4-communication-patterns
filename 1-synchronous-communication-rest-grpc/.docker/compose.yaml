@@ -55,9 +55,6 @@ services:
   # (EN: REST → gRPC Gateway — receives HTTP from client, forwards to gRPC backends.)
   # ──────────────────────────────────────────────
   gateway:
-    build:
-      context: ..
-      dockerfile: gateway/Dockerfile
     image: starciacademy/system-design-synchronous-communication-rest-grpc-gateway:latest
     container_name: sync-gateway
     ports:
@@ -80,9 +77,6 @@ services:
   # (EN: User gRPC Service — listens on internal gRPC port 5001.)
   # ──────────────────────────────────────────────
   user-service:
-    build:
-      context: ..
-      dockerfile: user-service/Dockerfile
     image: starciacademy/system-design-synchronous-communication-rest-grpc-user-service:latest
     container_name: sync-user
     expose:
@@ -96,9 +90,6 @@ services:
   # (EN: Product gRPC Service — listens on internal gRPC port 5002.)
   # ──────────────────────────────────────────────
   product-service:
-    build:
-      context: ..
-      dockerfile: product-service/Dockerfile
     image: starciacademy/system-design-synchronous-communication-rest-grpc-product-service:latest
     container_name: sync-product
     expose:
