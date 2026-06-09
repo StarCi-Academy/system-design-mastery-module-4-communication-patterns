@@ -1,0 +1,89 @@
+# Docker Compose — lesson `7-event-sourcing` (Event Store Service + PostgreSQL).
+# (EN: Docker Compose — lesson `7-event-sourcing` (Event Store Service + PostgreSQL).)
+#
+# Thư mục làm việc: 7-event-sourcing/.docker
+# (EN: Working directory: 7-event-sourcing/.docker)
+#
+# Khởi chạy stack:
+# (EN: Start stack:)
+#   cd 7-event-sourcing/.docker && docker compose up -d --build
+#
+# Xem log:
+# (EN: View logs:)
+#   docker compose logs -f
+#
+# Dọn dẹp:
+# (EN: Cleanup:)
+#   docker compose down -v
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 7-event-sourcing
+
+services:
+  # PostgreSQL — lưu trữ event log (bảng events) và snapshots (bảng account_snapshots).
+  # (EN: PostgreSQL — stores event log (events table) and snapshots (account_snapshots table).)
+  postgres:
+    image: postgres:16-alpine
+    container_name: 7-event-sourcing-postgres
+    environment:
+      POSTGRES_USER: eventsource
+      POSTGRES_PASSWORD: eventsource
+      POSTGRES_DB: event_store
+    ports:
+      # Ánh xạ host 5432 → container 5432 (có thể dùng psql để kiểm tra event log trực tiếp).
+      # (EN: Map host 5432 → container 5432 (use psql to inspect event log directly).)
+      - "5432:5432"
+    volumes:
+      # Volume named để dữ liệu bền vững giữa các lần restart.
+      # (EN: Named volume for data persistence across restarts.)
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - 7-event-sourcing
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventsource -d event_store"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Event Store Service — NestJS, build local từ source.
+  # Nhận commands (POST), append events, trả projection (GET), hỗ trợ replay/snapshot.
+  # (EN: Event Store Service — NestJS, built locally from source.
+  # Accepts commands (POST), appends events, returns projection (GET), supports replay/snapshot.)
+  event-store-service:
+    build:
+      context: ../event-store-service
+      dockerfile: Dockerfile
+    container_name: 7-event-sourcing-event-store-service
+    environment:
+      PORT: "3000"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: eventsource
+      DB_PASSWORD: eventsource
+      DB_NAME: event_store
+      # DB_LOGGING: "true"   # Bỏ comment để xem SQL queries trong log.
+      # (EN: Uncomment to see SQL queries in logs.)
+    ports:
+      # Ánh xạ host 3000 → container 3000 (REST API endpoint).
+      # (EN: Map host 3000 → container 3000 (REST API endpoint).)
+      - "3000:3000"
+    networks:
+      - 7-event-sourcing
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+# Volume named: dữ liệu Postgres bền vững.
+# (EN: Named volume: persistent Postgres data.)
+volumes:
+  postgres-data:
+    name: 7-event-sourcing-postgres-data
+
+# Network do Compose tạo; name đặt tên trên Docker trùng lesson (không external).
+# (EN: Compose-managed network; name sets Docker network name to match lesson (not external).)
+networks:
+  7-event-sourcing:
+    name: 7-event-sourcing

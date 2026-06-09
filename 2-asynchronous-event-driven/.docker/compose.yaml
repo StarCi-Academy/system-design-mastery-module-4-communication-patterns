@@ -1,0 +1,198 @@
+# Kiến trúc: Stack Docker lesson: asynchronous event driven.
+# (EN: Docker stack for lesson: asynchronous event driven.)
+#
+# Demo: HTTP API cổng 3001 (Order Service); Kafka UI cổng 8080.
+#
+# Thư mục làm việc: 2-asynchronous-event-driven/.docker
+# (EN: Working directory: 2-asynchronous-event-driven/.docker)
+#
+# Khởi chạy stack:
+# (EN: Start stack:)
+#   cd 2-asynchronous-event-driven/.docker && docker compose up -d --build
+#
+# Xem log:
+# (EN: View logs:)
+#   docker compose logs -f
+#
+# Dọn dẹp:
+# (EN: Cleanup:)
+#   docker compose down -v
+#
+# Docker Compose — lesson `2-asynchronous-event-driven`
+# (Kafka KRaft + Kafka UI + 3 NestJS backend: Order producer, Inventory/Notification consumers).
+# BUILD LOCAL — không dùng DockerHub image (SD rule S4: microservices-docker = build local).
+# (EN: Docker Compose — lesson `2-asynchronous-event-driven`
+# (Kafka KRaft + Kafka UI + 3 NestJS services: Order producer, Inventory/Notification consumers).
+# BUILD LOCAL — no DockerHub pull (SD rule S4: microservices-docker = build local).)
+#
+# Làm việc trong thư mục chứa file này: `.../2-asynchronous-event-driven/.docker/`
+# (EN: Run commands from this file's directory: `.../2-asynchronous-event-driven/.docker/`)
+#
+# Khởi chạy nền:
+# (EN: Start detached:)
+#     docker compose up -d --build
+#
+# Xem log consumer:
+# (EN: Tail consumer logs:)
+#     docker compose logs -f inventory-service
+#     docker compose logs -f notification-service
+#
+# Dừng và gỡ container + volume:
+# (EN: Stop/remove containers + volumes:)
+#     docker compose down -v
+# =============================================================================
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 2-asynchronous-event-driven
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka (KRaft mode — không cần Zookeeper).
+  # (EN: Kafka in KRaft mode — no Zookeeper required.)
+  # ──────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 2-asynchronous-event-driven-kafka
+    environment:
+      # Tên cluster KRaft.
+      # (EN: KRaft cluster name.)
+      KAFKA_CLUSTER_ID: starci-kafka-cluster
+      # Vai trò node: vừa broker vừa controller.
+      # (EN: Node roles: both broker and controller.)
+      KAFKA_PROCESS_ROLES: broker,controller
+      # ID node trong cluster.
+      # (EN: Node ID in cluster.)
+      KAFKA_NODE_ID: 1
+      # Quorum voters cho chế độ KRaft.
+      # (EN: Quorum voters for KRaft mode.)
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # Listener cho controller traffic (nội bộ).
+      # (EN: Controller listener (internal).)
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Các listener Kafka lắng nghe.
+      # (EN: Kafka listeners.)
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      # Listener quảng bá cho client kết nối trong mạng Compose.
+      # (EN: Advertised listener for client connections inside Compose network.)
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      # Mapping tên listener → security protocol.
+      # (EN: Listener name → security protocol mapping.)
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # Listener dùng cho giao tiếp giữa các broker.
+      # (EN: Inter-broker listener.)
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Hệ số replication cho topic offset (single-node dev).
+      # (EN: Offset topic replication factor (single-node dev).)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      # Kafka broker port cho client.
+      # (EN: Kafka broker port for clients.)
+      - "9092:9092"
+    networks:
+      - 2-asynchronous-event-driven-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — giao diện web quản lý Kafka.
+  # (EN: Kafka UI — web interface for Kafka management.)
+  # ──────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: 2-asynchronous-event-driven-kafka-ui
+    ports:
+      # UI web cho dev theo dõi topics, messages.
+      # (EN: Web UI for devs to monitor topics, messages.)
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 2-asynchronous-event-driven-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service (Producer) — REST API nhận POST /orders, emit event Kafka.
+  # BUILD LOCAL from ../order (Dockerfile multi-stage).
+  # (EN: Order Service (Producer) — REST API for POST /orders, emits Kafka event.
+  # BUILD LOCAL from ../order (multi-stage Dockerfile).)
+  # ──────────────────────────────────────────────
+  order-service:
+    build:
+      # Build từ thư mục service, không dùng DockerHub image.
+      # (EN: Build from service folder, not pulling DockerHub image.)
+      context: ../order
+      dockerfile: Dockerfile
+    container_name: 2-asynchronous-event-driven-order
+    ports:
+      # REST API cho client gọi tạo đơn hàng.
+      # (EN: REST API for client order creation.)
+      # Host port 3001 maps to container port 3001 (change host side if 3001 is occupied).
+      - "3001:3001"
+    environment:
+      # Địa chỉ Kafka broker trong mạng Compose.
+      # (EN: Kafka broker address inside Compose network.)
+      KAFKA_BROKERS: kafka:9092
+      # Port HTTP cho Order Service.
+      # (EN: HTTP port for Order Service.)
+      PORT: "3001"
+    depends_on:
+      - kafka
+    networks:
+      - 2-asynchronous-event-driven-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Consumer — lắng nghe event `order-events`, cập nhật tồn kho.
+  # BUILD LOCAL from ../inventory (Dockerfile multi-stage).
+  # (EN: Inventory Consumer — listens on `order-events` topic, updates stock.
+  # BUILD LOCAL from ../inventory (multi-stage Dockerfile).)
+  # ──────────────────────────────────────────────
+  inventory-service:
+    build:
+      # Build từ thư mục service, không dùng DockerHub image.
+      # (EN: Build from service folder, not pulling DockerHub image.)
+      context: ../inventory
+      dockerfile: Dockerfile
+    container_name: 2-asynchronous-event-driven-inventory
+    environment:
+      # Địa chỉ Kafka broker trong mạng Compose.
+      # (EN: Kafka broker address inside Compose network.)
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 2-asynchronous-event-driven-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Notification Consumer — lắng nghe event `order-events`, gửi thông báo.
+  # BUILD LOCAL from ../notification (Dockerfile multi-stage).
+  # (EN: Notification Consumer — listens on `order-events` topic, sends notification.
+  # BUILD LOCAL from ../notification (multi-stage Dockerfile).)
+  # ──────────────────────────────────────────────
+  notification-service:
+    build:
+      # Build từ thư mục service, không dùng DockerHub image.
+      # (EN: Build from service folder, not pulling DockerHub image.)
+      context: ../notification
+      dockerfile: Dockerfile
+    container_name: 2-asynchronous-event-driven-notification
+    environment:
+      # Địa chỉ Kafka broker trong mạng Compose.
+      # (EN: Kafka broker address inside Compose network.)
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 2-asynchronous-event-driven-network
+    restart: unless-stopped
+
+networks:
+  # Mạng nội bộ cho toàn stack lesson.
+  # (EN: Internal network for the lesson stack.)
+  2-asynchronous-event-driven-network:
+    driver: bridge
+    name: 2-asynchronous-event-driven-network

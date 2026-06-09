@@ -1,0 +1,68 @@
+# Docker Compose — lesson `7-event-sourcing` Go track.
+# Stack: PostgreSQL + event-store-service (Go, built locally).
+#
+# Working directory: 7-event-sourcing/3-go/.docker
+# Start: cd 7-event-sourcing/3-go/.docker && docker compose up -d --build
+# Logs:  docker compose logs -f
+# Cleanup: docker compose down -v
+
+# Compose project name — distinct from TS track ("7-event-sourcing").
+name: 7-event-sourcing-go
+
+services:
+  # PostgreSQL — stores the append-only events table and account_snapshots.
+  postgres:
+    image: postgres:16-alpine
+    container_name: 7-event-sourcing-go-postgres
+    environment:
+      POSTGRES_USER: eventsource
+      POSTGRES_PASSWORD: eventsource
+      POSTGRES_DB: event_store
+    ports:
+      # Host 5433 avoids colliding with the TS track which uses 5432.
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - 7-event-sourcing-go
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventsource -d event_store"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Event Store Service — Go, built locally from source.
+  # Accepts commands (POST), appends events, returns projection (GET),
+  # supports replay / snapshot / time-travel.
+  event-store-service:
+    build:
+      context: ../event-store-service
+      dockerfile: Dockerfile
+    container_name: 7-event-sourcing-go-event-store-service
+    environment:
+      PORT: "3000"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: eventsource
+      DB_PASSWORD: eventsource
+      DB_NAME: event_store
+    ports:
+      # Host 3010 avoids colliding with the TS track which uses 3000.
+      - "3010:3000"
+    networks:
+      - 7-event-sourcing-go
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+# Named volume: persistent Postgres data.
+volumes:
+  postgres-data:
+    name: 7-event-sourcing-go-postgres-data
+
+# Isolated bridge network; name matches lesson + lang track.
+networks:
+  7-event-sourcing-go:
+    name: 7-event-sourcing-go

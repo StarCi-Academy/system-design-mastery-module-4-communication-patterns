@@ -1,0 +1,176 @@
+# ──────────────────────────────────────────────
+# Saga Pattern — phối hợp nhiều service qua chuỗi event Kafka.
+# Order → Payment → Inventory, compensating transaction khi lỗi.
+# (EN: Saga Pattern — orchestrates multiple services via Kafka event chain.
+# Order → Payment → Inventory, compensating transactions on failure.)
+#
+# Thư mục làm việc / Working directory:
+#   cd system-design-mastery-module-4-communication-patterns/5-saga-orchestration-and-choreography/.docker
+#
+# Khởi động / Start:
+#   docker compose up -d
+#
+# Xem log / Logs:
+#   docker compose logs -f saga-order-service saga-payment-service saga-inventory-service
+#
+# Dọn dẹp / Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 5-saga-orchestration-and-choreography
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka KRaft — broker cho saga event bus.
+  # (EN: Kafka KRaft — broker for saga event bus.)
+  # ──────────────────────────────────────────────
+  # Kafka broker — partitioned log.
+  # (EN: Kafka broker — partitioned log.)
+  # Kafka broker.
+  # (EN: Kafka broker.)
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: kafka
+    environment:
+      # Mã định danh node trong cluster KRaft.
+      # (EN: Node identifier in KRaft cluster.)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      # Cổng broker cho client kết nối.
+      # (EN: Broker port for client connections.)
+      - "9092:9092"
+    # Healthcheck — app services chỉ khởi động sau khi broker sẵn sàng.
+    # (EN: Healthcheck — app services start only after the broker is ready.)
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — giao diện web quản lý topic/message.
+  # (EN: Kafka UI — web interface for topic/message management.)
+  # ──────────────────────────────────────────────
+  # Kafka UI — topic / lag / offset.
+  # (EN: Kafka UI — topics, lag, offsets.)
+  # Kafka UI — lag/offset.
+  # (EN: Kafka UI — lag/offset.)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      # Giao diện web tại http://localhost:8080.
+      # (EN: Web UI at http://localhost:8080.)
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service — REST tạo đơn hàng, saga orchestrator lắng nghe kết quả.
+  # (EN: Order Service — REST creates orders, saga orchestrator listens for results.)
+  # ──────────────────────────────────────────────
+  saga-order-service:
+    build:
+      context: ../order-service
+    container_name: saga-order-service
+    ports:
+      # REST API tạo đơn hàng tại http://localhost:3001.
+      # (EN: REST API to create orders at http://localhost:3001.)
+      - "3001:3001"
+    environment:
+      # Kafka broker trong mạng Compose.
+      # (EN: Kafka broker inside Compose network.)
+      KAFKA_BROKERS: kafka:9092
+      # SQLite database path cho Order Service.
+      # (EN: SQLite database path for Order Service.)
+      ORDER_SQLITE_PATH: /data/order.sqlite
+      PORT: "3001"
+    volumes:
+      - saga_order_sqlite:/data
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Payment Service — xử lý thanh toán, emit PAYMENT_CAPTURED hoặc PAYMENT_REFUNDED.
+  # (EN: Payment Service — processes payment, emits PAYMENT_CAPTURED or PAYMENT_REFUNDED.)
+  # ──────────────────────────────────────────────
+  saga-payment-service:
+    build:
+      context: ../payment-service
+    container_name: saga-payment-service
+    ports:
+      # Cổng debug (không có REST public API).
+      # (EN: Debug port (no public REST API).)
+      - "3002:3002"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      PAYMENT_SQLITE_PATH: /data/payment.sqlite
+      PORT: "3002"
+    volumes:
+      - saga_payment_sqlite:/data
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Service — kiểm tra tồn kho, emit INVENTORY_OK hoặc INVENTORY_OUT_OF_STOCK.
+  # (EN: Inventory Service — checks stock, emits INVENTORY_OK or INVENTORY_OUT_OF_STOCK.)
+  # ──────────────────────────────────────────────
+  saga-inventory-service:
+    build:
+      context: ../inventory-service
+    container_name: saga-inventory-service
+    ports:
+      # REST API quản lý tồn kho tại http://localhost:3003.
+      # (EN: REST API to manage stock at http://localhost:3003.)
+      - "3003:3003"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      INVENTORY_SQLITE_PATH: /data/inventory.sqlite
+      PORT: "3003"
+    volumes:
+      - saga_inventory_sqlite:/data
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Volumes — SQLite databases (persistent).
+# (EN: Volumes — SQLite databases (persistent).)
+# ──────────────────────────────────────────────
+volumes:
+  saga_order_sqlite: {}
+  saga_payment_sqlite: {}
+  saga_inventory_sqlite: {}
+
+# ──────────────────────────────────────────────
+# Network — Compose tự quản lý, không dùng `external: true`.
+# (EN: Network — Compose-managed, no `external: true`.)
+# ──────────────────────────────────────────────
+networks:
+  default:
+    name: 5-saga-orchestration-and-choreography

@@ -1,0 +1,171 @@
+# ──────────────────────────────────────────────
+# Saga Pattern — Java track (Spring Boot 3).
+# Order Service (PostgreSQL + Kafka producer) + Inventory Service (MongoDB + Kafka consumer).
+# (EN: Saga choreography Java track — same contract as the TS track, different DB drivers.)
+#
+# Working directory:
+#   cd system-design-mastery-module-3-communication-patterns/5-saga-orchestration-and-choreography/1-java/.docker
+#
+# Start:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f saga-java-order-service saga-java-inventory-service
+#
+# Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Compose project name — distinct from the TS stack to allow both tracks running side-by-side.
+name: 5-saga-orchestration-and-choreography-java
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka KRaft — shared event bus for the saga.
+  # (EN: Kafka KRaft — saga event bus.)
+  # ──────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: saga-java-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    # Host port 9192 avoids collision with the TS track's Kafka on 9092.
+    ports:
+      - "9192:9092"
+    networks:
+      - saga-java
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — web interface for topic/message inspection.
+  # (EN: Kafka UI — topics, lag, offsets.)
+  # ──────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: saga-java-kafka-ui
+    # Host port 8180 avoids collision with the TS track's Kafka UI on 8080.
+    ports:
+      - "8180:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - saga-java
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — persistence for Order Service.
+  # (EN: PostgreSQL — order table storage.)
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: saga-java-postgres
+    environment:
+      POSTGRES_DB: orders
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    # Host port 5442 avoids collision with local PostgreSQL or TS track.
+    ports:
+      - "5442:5432"
+    volumes:
+      - saga_java_postgres:/var/lib/postgresql/data
+    networks:
+      - saga-java
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # MongoDB — persistence for Inventory Service.
+  # (EN: MongoDB — product stock and fulfillment document storage.)
+  # ──────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: saga-java-mongo
+    environment:
+      MONGO_INITDB_DATABASE: inventory
+    # Host port 27027 avoids collision with local MongoDB or TS track.
+    ports:
+      - "27027:27017"
+    volumes:
+      - saga_java_mongo:/data/db
+    networks:
+      - saga-java
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service — Spring Boot; REST POST /order; emits ORDER_CREATED.
+  # (EN: Order Service — persists to PostgreSQL, emits ORDER_CREATED to Kafka.)
+  # Host port 3011 avoids collision with TS track port 3001.
+  # ──────────────────────────────────────────────
+  saga-java-order-service:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    container_name: saga-java-order-service
+    ports:
+      - "3011:3011"
+    environment:
+      PORT: "3011"
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: orders
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    depends_on:
+      - kafka
+      - postgres
+    networks:
+      - saga-java
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Service — Spring Boot; REST POST /check; consumes ORDER_CREATED / PAYMENT_CAPTURED.
+  # (EN: Inventory Service — decrements stock in MongoDB, emits INVENTORY_OK or INVENTORY_OUT_OF_STOCK.)
+  # Host port 3012 avoids collision with TS track port 3003.
+  # ──────────────────────────────────────────────
+  saga-java-inventory-service:
+    build:
+      context: ../inventory-service
+      dockerfile: Dockerfile
+    container_name: saga-java-inventory-service
+    ports:
+      - "3012:3012"
+    environment:
+      PORT: "3012"
+      KAFKA_BROKERS: kafka:9092
+      MONGO_URI: mongodb://mongo:27017/inventory
+    depends_on:
+      - kafka
+      - mongo
+    networks:
+      - saga-java
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Named volumes — persist data across container restarts.
+# (EN: Persistent named volumes for PostgreSQL and MongoDB.)
+# ──────────────────────────────────────────────
+volumes:
+  saga_java_postgres: {}
+  saga_java_mongo: {}
+
+# ──────────────────────────────────────────────
+# Network — isolated bridge network for this stack.
+# (EN: Compose-managed bridge network, no external: true.)
+# ──────────────────────────────────────────────
+networks:
+  saga-java:
+    name: 5-saga-orchestration-and-choreography-java

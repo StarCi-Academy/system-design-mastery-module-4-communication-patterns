@@ -1,0 +1,155 @@
+# ──────────────────────────────────────────────
+# Database Per Service — C# track (ASP.NET Core 8).
+# Order Service: ASP.NET Core + EF Core/Npgsql → PostgreSQL + emits Kafka ORDER_CREATED.
+# Inventory Service: ASP.NET Core + MongoDB.Driver → MongoDB + consumes ORDER_CREATED.
+# (EN: Database Per Service C# track — mirrors the TypeScript track contract.)
+#
+# Working directory:
+#   4-database-per-service/2-csharp/.docker
+#
+# Start:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f order-service inventory-service
+#
+# Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Compose project name — distinct from TS track to allow both stacks to run side-by-side.
+name: 4-database-per-service-csharp
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka KRaft broker — no Zookeeper needed (Apache Kafka 3.8).
+  # ──────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 4-database-per-service-csharp-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Fixed cluster ID for dev — avoids re-format on container restart.
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    # Host port 4092 avoids collision with the TS track (9092).
+    ports:
+      - "4092:9092"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — web dashboard for topic / offset inspection.
+  # ──────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: 4-database-per-service-csharp-kafka-ui
+    # Host port 4080 avoids collision with the TS track (8080).
+    ports:
+      - "4080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      # Connect to broker inside the Compose network (internal port 9092).
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — persistence for Order Service (EF Core / Npgsql).
+  # ──────────────────────────────────────────────
+  postgres-order:
+    image: postgres:16-alpine
+    container_name: 4-database-per-service-csharp-postgres
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: order
+      POSTGRES_DB: order_db
+    # Host port 5434 — distinct from TS (5432) and Java (5433) tracks.
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_order_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # MongoDB — persistence for Inventory Service (MongoDB.Driver).
+  # ──────────────────────────────────────────────
+  mongo-inventory:
+    image: mongo:7
+    container_name: 4-database-per-service-csharp-mongo
+    # Host port 27019 — distinct from TS (27017) and Java (27018) tracks.
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo_inventory_data:/data/db
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service — REST API, persists to PostgreSQL, emits Kafka event.
+  # Host port 3021; container port 3021 (matches EXPOSE in Dockerfile and PORT env).
+  # ──────────────────────────────────────────────
+  order-service:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    container_name: 4-database-per-service-csharp-order
+    # Host port 3021 — distinct from TS (3001) and Java (3011) tracks.
+    ports:
+      - "3021:3021"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      ORDER_DB_HOST: postgres-order
+      ORDER_DB_PORT: "5432"
+      ORDER_DB_USER: order
+      ORDER_DB_PASSWORD: order
+      ORDER_DB_NAME: order_db
+      PORT: "3021"
+    depends_on:
+      - kafka
+      - postgres-order
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Service — Kafka consumer, manages stock in MongoDB.
+  # Host port 3022; container port 3022 (matches EXPOSE in Dockerfile and PORT env).
+  # ──────────────────────────────────────────────
+  inventory-service:
+    build:
+      context: ../inventory-service
+      dockerfile: Dockerfile
+    container_name: 4-database-per-service-csharp-inventory
+    # Host port 3022 — distinct from TS (3002) and Java (3012) tracks.
+    ports:
+      - "3022:3022"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      INVENTORY_MONGO_URI: mongodb://mongo-inventory:27017/inventory_db
+      KAFKA_GROUP_ID: inventory-consumer-group
+      PORT: "3022"
+    depends_on:
+      - kafka
+      - mongo-inventory
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Volumes — persistent data for PostgreSQL and MongoDB.
+# ──────────────────────────────────────────────
+volumes:
+  pg_order_data: {}
+  mongo_inventory_data: {}
+
+# ──────────────────────────────────────────────
+# Network — Compose-managed bridge network.
+# ──────────────────────────────────────────────
+networks:
+  default:
+    name: 4-database-per-service-csharp

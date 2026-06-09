@@ -1,0 +1,138 @@
+# Docker Compose — lesson `6-cqrs-and-read-models` Java track.
+# CQRS: Write Service (Spring Boot + PostgreSQL + RabbitMQ publisher)
+#        Read  Service (Spring Boot + Elasticsearch + RabbitMQ consumer).
+#
+# Working directory: 6-cqrs-and-read-models/1-java/.docker
+#
+# Start stack:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f cqrs-write-service cqrs-read-service
+#
+# Cleanup:
+#   docker compose down -v
+
+# Compose project name (stack / container prefix).
+name: 6-cqrs-and-read-models-java
+
+services:
+  # ──────────────────────────────────────────────
+  # RabbitMQ — message broker syncing events from write-service → read-service.
+  # ──────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: 6-cqrs-java-rabbitmq
+    ports:
+      # AMQP port for service connections (host 5673 avoids clash with TS track 5672).
+      - "5673:5672"
+      # RabbitMQ management UI at http://localhost:15673.
+      - "15673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — Write Model database (Spring Data JPA / Hibernate).
+  # ──────────────────────────────────────────────
+  postgres-cqrs-write:
+    image: postgres:16-alpine
+    container_name: 6-cqrs-java-postgres
+    environment:
+      POSTGRES_USER: cqrs
+      POSTGRES_PASSWORD: cqrs
+      POSTGRES_DB: cqrs_write
+    ports:
+      # Host 5434 avoids collision with TS track (5433) and default Postgres (5432).
+      - "5434:5432"
+    volumes:
+      - pg_cqrs_write_java:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Elasticsearch — Read Model (denormalized view).
+  # ──────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: 6-cqrs-java-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      # Host 9201 avoids collision with TS track (9200).
+      - "9201:9200"
+    volumes:
+      - es_cqrs_data_java:/usr/share/elasticsearch/data
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Write Service — Spring Boot; receives POST commands, persists to PostgreSQL,
+  # emits customer.profile.updated events to RabbitMQ.
+  # ──────────────────────────────────────────────
+  cqrs-write-service:
+    build:
+      context: ../write-service
+      dockerfile: Dockerfile
+    container_name: 6-cqrs-java-write-service
+    ports:
+      # REST API at http://localhost:3010 (host port avoids clash with TS 3000).
+      - "3010:3000"
+    environment:
+      # RabbitMQ inside Compose network.
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      # PostgreSQL Write Model.
+      WRITE_DB_HOST: postgres-cqrs-write
+      WRITE_DB_PORT: "5432"
+      WRITE_DB_USER: cqrs
+      WRITE_DB_PASSWORD: cqrs
+      WRITE_DB_NAME: cqrs_write
+      PORT: "3000"
+    depends_on:
+      - rabbitmq
+      - postgres-cqrs-write
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Read Service — Spring Boot; consumes RabbitMQ events, indexes to Elasticsearch,
+  # serves GET /customer/:id queries.
+  # ──────────────────────────────────────────────
+  cqrs-read-service:
+    build:
+      context: ../read-service
+      dockerfile: Dockerfile
+    container_name: 6-cqrs-java-read-service
+    ports:
+      # REST API at http://localhost:3011 (host port avoids clash with TS 3001).
+      - "3011:3001"
+    environment:
+      # RabbitMQ inside Compose network.
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      # Elasticsearch inside Compose network.
+      ELASTICSEARCH_NODE: http://elasticsearch:9200
+      PORT: "3001"
+    depends_on:
+      - rabbitmq
+      - elasticsearch
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Volumes — persistent data.
+# ──────────────────────────────────────────────
+volumes:
+  pg_cqrs_write_java: {}
+  es_cqrs_data_java: {}
+
+# ──────────────────────────────────────────────
+# Network — Compose-managed.
+# ──────────────────────────────────────────────
+networks:
+  default:
+    name: 6-cqrs-and-read-models-java

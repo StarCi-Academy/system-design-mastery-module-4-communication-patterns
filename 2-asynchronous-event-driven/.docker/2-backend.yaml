@@ -1,0 +1,36 @@
+# Docker Compose only — Order (producer) + Inventory/Notification (consumers).
+# Requires: starci-network; start .docker/1-kafka.yaml first.
+services:
+  order-service:
+    image: starciacademy/asynchronous-event-driven-order:latest
+    container_name: order-service
+    ports:
+      - "3001:3001"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    networks:
+      - starci-network
+    restart: unless-stopped
+
+  inventory-service:
+    image: starciacademy/asynchronous-event-driven-inventory:latest
+    container_name: inventory-service
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    networks:
+      - starci-network
+    restart: unless-stopped
+
+  notification-service:
+    image: starciacademy/asynchronous-event-driven-notification:latest
+    container_name: notification-service
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    networks:
+      - starci-network
+    restart: unless-stopped
+
+networks:
+  starci-network:
+    external: true
+    name: starci-network

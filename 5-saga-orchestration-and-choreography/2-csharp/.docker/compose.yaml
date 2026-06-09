@@ -1,0 +1,138 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Saga Pattern — C# track (ASP.NET Core 8 + PostgreSQL + MongoDB + Kafka).
+# Order Service (PostgreSQL) and Inventory Service (MongoDB) communicate via
+# the `saga.demo.events` Kafka topic using choreography saga.
+#
+# Working directory:
+#   cd 5-saga-orchestration-and-choreography/2-csharp/.docker
+#
+# Start:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f saga-csharp-order saga-csharp-inventory
+#
+# Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: 5-saga-orchestration-and-choreography-csharp
+
+services:
+
+  # ── Kafka KRaft — saga event bus ────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 5-saga-csharp-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    networks:
+      - 5-saga-orchestration-and-choreography-csharp
+    restart: unless-stopped
+
+  # ── Kafka UI — topic/lag inspection at http://localhost:8081 ────────────────
+  # Distinct host port 8081 avoids collision with TS track (8080).
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: 5-saga-csharp-kafka-ui
+    ports:
+      - "8081:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 5-saga-orchestration-and-choreography-csharp
+    restart: unless-stopped
+
+  # ── PostgreSQL — order-service database ─────────────────────────────────────
+  # Distinct host port 5433 avoids collision with TS track (5432 if any).
+  postgres:
+    image: postgres:16-alpine
+    container_name: 5-saga-csharp-postgres
+    environment:
+      POSTGRES_DB: orders
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - saga_csharp_postgres:/var/lib/postgresql/data
+    networks:
+      - 5-saga-orchestration-and-choreography-csharp
+    restart: unless-stopped
+
+  # ── MongoDB — inventory-service database ────────────────────────────────────
+  # Distinct host port 27018 avoids collision with any local Mongo on 27017.
+  mongo:
+    image: mongo:7
+    container_name: 5-saga-csharp-mongo
+    ports:
+      - "27018:27017"
+    volumes:
+      - saga_csharp_mongo:/data/db
+    networks:
+      - 5-saga-orchestration-and-choreography-csharp
+    restart: unless-stopped
+
+  # ── Order Service — POST /order + saga consumer ──────────────────────────────
+  # Host port 4001 (distinct from TS order-service on 3001).
+  saga-csharp-order:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    container_name: 5-saga-csharp-order
+    ports:
+      - "4001:3001"
+    environment:
+      PORT: "3001"
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_URL: "Host=postgres;Port=5432;Database=orders;Username=postgres;Password=postgres"
+    depends_on:
+      - kafka
+      - postgres
+    networks:
+      - 5-saga-orchestration-and-choreography-csharp
+    restart: unless-stopped
+
+  # ── Inventory Service — POST /check + saga consumer ─────────────────────────
+  # Host port 4003 (distinct from TS inventory-service on 3003).
+  saga-csharp-inventory:
+    build:
+      context: ../inventory-service
+      dockerfile: Dockerfile
+    container_name: 5-saga-csharp-inventory
+    ports:
+      - "4003:3003"
+    environment:
+      PORT: "3003"
+      KAFKA_BROKERS: kafka:9092
+      MONGO_URI: "mongodb://mongo:27017"
+    depends_on:
+      - kafka
+      - mongo
+    networks:
+      - 5-saga-orchestration-and-choreography-csharp
+    restart: unless-stopped
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  saga_csharp_postgres: {}
+  saga_csharp_mongo: {}
+
+# ── Network ──────────────────────────────────────────────────────────────────
+networks:
+  5-saga-orchestration-and-choreography-csharp:
+    name: 5-saga-orchestration-and-choreography-csharp

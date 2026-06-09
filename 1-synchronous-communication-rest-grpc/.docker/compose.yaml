@@ -1,0 +1,116 @@
+# Kiến trúc: Stack Docker lesson: synchronous communication rest grpc.
+# (EN: Docker stack for lesson: synchronous communication rest grpc.)
+#
+# Demo: HTTP API cổng 3000 (hoặc theo compose); xem README module.
+#
+# Thư mục làm việc: 1-synchronous-communication-rest-grpc/.docker
+# (EN: Working directory: 1-synchronous-communication-rest-grpc/.docker)
+#
+# Khởi chạy stack:
+# (EN: Start stack:)
+#   cd 1-synchronous-communication-rest-grpc/.docker && docker compose up -d --build
+#
+# Xem log:
+# (EN: View logs:)
+#   docker compose logs -f
+#
+# Dọn dẹp:
+# (EN: Cleanup:)
+#   docker compose down -v
+#
+# Docker Compose — lesson `1-synchronous-communication-rest-grpc`
+# (REST Gateway + 2 gRPC backends: User, Product).
+# (EN: Docker Compose — lesson `1-synchronous-communication-rest-grpc`
+# (REST Gateway + 2 gRPC backends: User, Product).)
+#
+# Làm việc trong thư mục chứa file này: `.../1-synchronous-communication-rest-grpc/.docker/`
+# (EN: Run commands from this file's directory: `.../1-synchronous-communication-rest-grpc/.docker/`)
+#
+# Compose tự tạo network `1-synchronous-communication-rest-grpc` khi `up`
+# (không cần `docker network create`).
+# (EN: Compose creates network `1-synchronous-communication-rest-grpc` on `up`
+# (no manual `docker network create`).)
+#
+# Khởi chạy nền:
+# (EN: Start detached:)
+#     docker compose up -d --build
+#
+# Xem log gateway / backend:
+# (EN: Tail gateway / backend logs:)
+#     docker compose logs -f gateway
+#     docker compose logs -f user-service
+#
+# Dừng và gỡ container + volume:
+# (EN: Stop/remove containers + volumes:)
+#     docker compose down -v
+# =============================================================================
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 1-synchronous-communication-rest-grpc
+
+services:
+  # ──────────────────────────────────────────────
+  # REST → gRPC Gateway — nhận HTTP từ client, chuyển tiếp sang gRPC backend.
+  # (EN: REST → gRPC Gateway — receives HTTP from client, forwards to gRPC backends.)
+  # ──────────────────────────────────────────────
+  gateway:
+    build:
+      # Build từ source local — không dùng image cloud.
+      # (EN: Build from local source — no cloud image pull.)
+      context: ../gateway
+      dockerfile: Dockerfile
+    container_name: sync-gateway
+    ports:
+      # REST API cho client gọi trực tiếp.
+      # (EN: REST API for direct client calls.)
+      # Cổng HTTP API host → container.
+      # (EN: HTTP API host → container port.)
+      - "3000:3000"
+    environment:
+      # Địa chỉ gRPC của User Service trong mạng Compose.
+      # (EN: gRPC address of User Service inside Compose network.)
+      USER_GRPC_URL: user-service:5001
+      # Địa chỉ gRPC của Product Service trong mạng Compose.
+      # (EN: gRPC address of Product Service inside Compose network.)
+      PRODUCT_GRPC_URL: product-service:5002
+    depends_on:
+      # Đảm bảo backend khởi động trước gateway để tránh lỗi UNAVAILABLE.
+      # (EN: Ensure backends start before gateway to avoid UNAVAILABLE errors.)
+      - user-service
+      - product-service
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # User gRPC Service — lắng nghe gRPC trên cổng nội bộ 5001.
+  # (EN: User gRPC Service — listens on internal gRPC port 5001.)
+  # ──────────────────────────────────────────────
+  user-service:
+    build:
+      # Build từ source local — không dùng image cloud.
+      # (EN: Build from local source — no cloud image pull.)
+      context: ../user-service
+      dockerfile: Dockerfile
+    container_name: sync-user
+    expose:
+      # Chỉ expose nội bộ cho Gateway gọi qua gRPC (không public ra host).
+      # (EN: Internal-only expose for Gateway gRPC calls (not published to host).)
+      - "5001"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Product gRPC Service — lắng nghe gRPC trên cổng nội bộ 5002.
+  # (EN: Product gRPC Service — listens on internal gRPC port 5002.)
+  # ──────────────────────────────────────────────
+  product-service:
+    build:
+      # Build từ source local — không dùng image cloud.
+      # (EN: Build from local source — no cloud image pull.)
+      context: ../product-service
+      dockerfile: Dockerfile
+    container_name: sync-product
+    expose:
+      # Chỉ expose nội bộ cho Gateway gọi qua gRPC (không public ra host).
+      # (EN: Internal-only expose for Gateway gRPC calls (not published to host).)
+      - "5002"
+    restart: unless-stopped

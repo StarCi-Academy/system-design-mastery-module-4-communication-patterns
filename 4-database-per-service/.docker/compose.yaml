@@ -1,0 +1,195 @@
+# ──────────────────────────────────────────────
+# Database Per Service — mỗi microservice sở hữu DB riêng.
+# Order Service dùng PostgreSQL (TypeORM), Inventory Service dùng MongoDB (Mongoose).
+# Kafka truyền event ORDER_CREATED giữa hai service.
+# (EN: Database Per Service — each microservice owns its own database.
+# Order Service uses PostgreSQL (TypeORM), Inventory Service uses MongoDB (Mongoose).
+# Kafka transports ORDER_CREATED events between the two services.)
+#
+# Thư mục làm việc / Working directory:
+#   cd system-design-mastery-module-4-communication-patterns/4-database-per-service/.docker
+#
+# Khởi động / Start:
+#   docker compose up -d
+#
+# Xem log / Logs:
+#   docker compose logs -f order-service inventory-service
+#
+# Dọn dẹp / Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 4-database-per-service
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka KRaft — broker không cần Zookeeper (Apache Kafka 3.8).
+  # (EN: Kafka KRaft — broker without Zookeeper (Apache Kafka 3.8).)
+  # ──────────────────────────────────────────────
+  # Kafka broker — partitioned log.
+  # (EN: Kafka broker — partitioned log.)
+  # Kafka broker.
+  # (EN: Kafka broker.)
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: kafka
+    environment:
+      # Mã định danh node trong cluster KRaft.
+      # (EN: Node identifier in KRaft cluster.)
+      KAFKA_NODE_ID: 1
+      # Vai trò node: vừa broker vừa controller.
+      # (EN: Node role: acts as both broker and controller.)
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Listener cho giao tiếp giữa các service và controller quorum.
+      # (EN: Listeners for inter-service communication and controller quorum.)
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Cluster ID cố định cho dev, không cần format mỗi lần.
+      # (EN: Fixed cluster ID for dev, no need to format each time.)
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      # Cổng broker cho client kết nối.
+      # (EN: Broker port for client connections.)
+      - "9092:9092"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — giao diện web quản lý topic/message.
+  # (EN: Kafka UI — web interface for topic/message management.)
+  # ──────────────────────────────────────────────
+  # Kafka UI — topic / lag / offset.
+  # (EN: Kafka UI — topics, lag, offsets.)
+  # Kafka UI — lag/offset.
+  # (EN: Kafka UI — lag/offset.)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      # Giao diện web tại http://localhost:8080.
+      # (EN: Web UI at http://localhost:8080.)
+      - "8080:8080"
+    environment:
+      # Kết nối tới Kafka broker trong mạng Compose.
+      # (EN: Connect to Kafka broker inside Compose network.)
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — persistence cho Order Service (TypeORM).
+  # (EN: PostgreSQL — persistence for Order Service (TypeORM).)
+  # ──────────────────────────────────────────────
+  postgres-order:
+    image: postgres:16-alpine
+    container_name: postgres-order
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: order
+      POSTGRES_DB: order_db
+    ports:
+      # Ánh xạ cổng host 5432 → container 5432 (PostgreSQL).
+      # (EN: Map host port 5432 → container 5432 (PostgreSQL).)
+      - "5432:5432"
+    volumes:
+      - pg_order_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # MongoDB — persistence cho Inventory Service (Mongoose).
+  # (EN: MongoDB — persistence for Inventory Service (Mongoose).)
+  # ──────────────────────────────────────────────
+  mongo-inventory:
+    image: mongo:7
+    container_name: mongo-inventory
+    ports:
+      # Ánh xạ cổng host 27017 → container 27017 (MongoDB).
+      # (EN: Map host port 27017 → container 27017 (MongoDB).)
+      - "27017:27017"
+    volumes:
+      - mongo_inventory_data:/data/db
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service — REST API tạo đơn hàng, lưu PostgreSQL, emit Kafka event.
+  # (EN: Order Service — REST API for creating orders, persists to PostgreSQL, emits Kafka events.)
+  # ──────────────────────────────────────────────
+  order-service:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    image: starciacademy/database-per-service-order:latest
+    container_name: order-service
+    ports:
+      # REST API cho client gọi tạo đơn hàng.
+      # (EN: REST API for client to create orders.)
+      - "3001:3001"
+    environment:
+      # Địa chỉ Kafka broker trong mạng Compose.
+      # (EN: Kafka broker address inside Compose network.)
+      KAFKA_BROKERS: kafka:9092
+      # Kết nối PostgreSQL cho Order Service.
+      # (EN: PostgreSQL connection for Order Service.)
+      ORDER_DB_HOST: postgres-order
+      ORDER_DB_PORT: "5432"
+      ORDER_DB_USER: order
+      ORDER_DB_PASSWORD: order
+      ORDER_DB_NAME: order_db
+      PORT: "3001"
+    depends_on:
+      - kafka
+      - postgres-order
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Service — Kafka consumer, quản lý tồn kho bằng MongoDB.
+  # (EN: Inventory Service — Kafka consumer, manages stock via MongoDB.)
+  # ──────────────────────────────────────────────
+  inventory-service:
+    build:
+      context: ../inventory-service
+      dockerfile: Dockerfile
+    image: starciacademy/database-per-service-inventory:latest
+    container_name: inventory-service
+    ports:
+      # REST API cho client tạo product / kiểm tra tồn kho.
+      # (EN: REST API for client to create products / check stock.)
+      - "3002:3002"
+    environment:
+      # Địa chỉ Kafka broker trong mạng Compose.
+      # (EN: Kafka broker address inside Compose network.)
+      KAFKA_BROKERS: kafka:9092
+      # Kết nối MongoDB cho Inventory Service.
+      # (EN: MongoDB connection for Inventory Service.)
+      INVENTORY_MONGO_URI: mongodb://mongo-inventory:27017/inventory_db
+      PORT: "3002"
+    depends_on:
+      - kafka
+      - mongo-inventory
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Volumes — dữ liệu persistent cho PostgreSQL và MongoDB.
+# (EN: Volumes — persistent data for PostgreSQL and MongoDB.)
+# ──────────────────────────────────────────────
+volumes:
+  pg_order_data: {}
+  mongo_inventory_data: {}
+
+# ──────────────────────────────────────────────
+# Network — Compose tự quản lý, không dùng `external: true`.
+# (EN: Network — Compose-managed, no `external: true`.)
+# ──────────────────────────────────────────────
+networks:
+  default:
+    name: 4-database-per-service

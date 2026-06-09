@@ -1,0 +1,49 @@
+version: "3.9"
+
+# Go stack for 0-api-gateway lesson.
+# All images are built locally — no DockerHub pull for app services (SD docker policy).
+# api-gateway routes by path prefix using httputil.ReverseProxy.
+
+services:
+  api-gateway:
+    build:
+      context: ../api-gateway
+    ports:
+      # Host :8000 → container :8000; E2E curls go to localhost:8000.
+      - "8000:8000"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+    networks:
+      - 0-api-gateway-go
+
+  user-service:
+    build:
+      context: ../user-service
+    ports:
+      # Expose for direct-vs-gateway flow-4 comparison.
+      - "3001:3001"
+    networks:
+      - 0-api-gateway-go
+
+  product-service:
+    build:
+      context: ../product-service
+    ports:
+      - "3002:3002"
+    networks:
+      - 0-api-gateway-go
+
+  order-service:
+    build:
+      context: ../order-service
+    ports:
+      - "3003:3003"
+    networks:
+      - 0-api-gateway-go
+
+networks:
+  # Isolated bridge network; name is unique per lang track to avoid cross-lesson collisions.
+  0-api-gateway-go:
+    driver: bridge

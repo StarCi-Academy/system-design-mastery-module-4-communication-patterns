@@ -1,0 +1,156 @@
+# ──────────────────────────────────────────────
+# CQRS Pattern — tách đọc/ghi: Write Model (PostgreSQL) + Read Model (Elasticsearch).
+# RabbitMQ đồng bộ event từ Write Service sang Read Service.
+# (EN: CQRS Pattern — separate read/write: Write Model (PostgreSQL) + Read Model (Elasticsearch).
+# RabbitMQ synchronizes events from Write Service to Read Service.)
+#
+# Thư mục làm việc / Working directory:
+#   cd system-design-mastery-module-4-communication-patterns/6-cqrs-and-read-models/.docker
+#
+# Khởi động / Start:
+#   docker compose up -d
+#
+# Xem log / Logs:
+#   docker compose logs -f cqrs-write-service cqrs-read-service
+#
+# Dọn dẹp / Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 6-cqrs-and-read-models
+
+services:
+  # ──────────────────────────────────────────────
+  # RabbitMQ — message broker đồng bộ event write → read.
+  # (EN: RabbitMQ — message broker syncing events from write → read.)
+  # ──────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-cqrs
+    ports:
+      # Cổng AMQP cho các service kết nối.
+      # (EN: AMQP port for service connections.)
+      - "5672:5672"
+      # Giao diện quản lý RabbitMQ tại http://localhost:15672.
+      # (EN: RabbitMQ management UI at http://localhost:15672.)
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — Write Model database (TypeORM).
+  # (EN: PostgreSQL — Write Model database (TypeORM).)
+  # ──────────────────────────────────────────────
+  postgres-cqrs-write:
+    image: postgres:16-alpine
+    container_name: postgres-cqrs-write
+    environment:
+      POSTGRES_USER: cqrs
+      POSTGRES_PASSWORD: cqrs
+      POSTGRES_DB: cqrs_write
+    ports:
+      # Ánh xạ cổng host 5433 → container 5432 (tránh xung đột 5432 mặc định).
+      # (EN: Map host port 5433 → container 5432 (avoids default 5432 conflict).)
+      - "5433:5432"
+    volumes:
+      - pg_cqrs_write:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Elasticsearch — Read Model database (denormalized view).
+  # (EN: Elasticsearch — Read Model database (denormalized view).)
+  # ──────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: elasticsearch-cqrs
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      # Cổng HTTP Elasticsearch tại http://localhost:9200.
+      # (EN: Elasticsearch HTTP port at http://localhost:9200.)
+      - "9200:9200"
+    volumes:
+      - es_cqrs_data:/usr/share/elasticsearch/data
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Write Service — nhận command POST, lưu PostgreSQL, emit event RabbitMQ.
+  # (EN: Write Service — receives POST commands, persists to PostgreSQL, emits events to RabbitMQ.)
+  # ──────────────────────────────────────────────
+  cqrs-write-service:
+    build:
+      context: ../write-service
+      dockerfile: Dockerfile
+    container_name: cqrs-write-service
+    ports:
+      # REST API nhận command ghi tại http://localhost:3000.
+      # (EN: REST API receiving write commands at http://localhost:3000.)
+      # Cổng HTTP API host → container.
+      # (EN: HTTP API host → container port.)
+      - "3000:3000"
+    environment:
+      # Kết nối RabbitMQ trong mạng Compose.
+      # (EN: RabbitMQ connection inside Compose network.)
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      RABBITMQ_QUEUE: cqrs.customer.profile
+      # Kết nối PostgreSQL (Write Model).
+      # (EN: PostgreSQL connection (Write Model).)
+      WRITE_DB_HOST: postgres-cqrs-write
+      WRITE_DB_PORT: "5432"
+      WRITE_DB_USER: cqrs
+      WRITE_DB_PASSWORD: cqrs
+      WRITE_DB_NAME: cqrs_write
+      PORT: "3000"
+    depends_on:
+      - rabbitmq
+      - postgres-cqrs-write
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Read Service — nhận event RabbitMQ, index vào Elasticsearch, serve GET query.
+  # (EN: Read Service — receives RabbitMQ events, indexes to Elasticsearch, serves GET queries.)
+  # ──────────────────────────────────────────────
+  cqrs-read-service:
+    build:
+      context: ../read-service
+      dockerfile: Dockerfile
+    container_name: cqrs-read-service
+    ports:
+      # REST API trả query đọc tại http://localhost:3001.
+      # (EN: REST API serving read queries at http://localhost:3001.)
+      - "3001:3001"
+    environment:
+      # Kết nối RabbitMQ trong mạng Compose.
+      # (EN: RabbitMQ connection inside Compose network.)
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      RABBITMQ_QUEUE: cqrs.customer.profile
+      # Kết nối Elasticsearch (Read Model).
+      # (EN: Elasticsearch connection (Read Model).)
+      ELASTICSEARCH_NODE: http://elasticsearch:9200
+      PORT: "3001"
+    depends_on:
+      - rabbitmq
+      - elasticsearch
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Volumes — dữ liệu persistent.
+# (EN: Volumes — persistent data.)
+# ──────────────────────────────────────────────
+volumes:
+  pg_cqrs_write: {}
+  es_cqrs_data: {}
+
+# ──────────────────────────────────────────────
+# Network — Compose tự quản lý, không dùng `external: true`.
+# (EN: Network — Compose-managed, no `external: true`.)
+# ──────────────────────────────────────────────
+networks:
+  default:
+    name: 6-cqrs-and-read-models

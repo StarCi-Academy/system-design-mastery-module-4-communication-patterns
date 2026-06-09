@@ -1,0 +1,103 @@
+# Docker Compose stack for the C# track of lesson 2-asynchronous-event-driven.
+# All images are built locally from source (SD rule S4 — no DockerHub images for app services).
+# Host ports are offset to avoid conflicts with the TS stack:
+#   Kafka:         9094 → 9092  (TS uses 9092, Java uses 9093)
+#   Order service: 3021 → 3001
+
+name: 2-async-event-driven-csharp
+
+services:
+  # -----------------------------------------------------------------------
+  # Kafka broker — KRaft mode (no ZooKeeper), single-node for development.
+  # Uses the official apache/kafka image (SD rule: well-known infra image OK).
+  # -----------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 2-async-event-driven-csharp-kafka
+    environment:
+      # KRaft cluster ID — any valid UUID string works for a single-node cluster.
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # Two listeners: PLAINTEXT for inter-container traffic, EXTERNAL for host access.
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # Auto-create topic order-events on first produce (single partition, no replication for dev).
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      CLUSTER_ID: "csharp-async-event-demo-01"
+    ports:
+      # Expose external listener on host port 9094 (TS=9092, Java=9093, C#=9094).
+      - "9094:9094"
+    networks:
+      - 2-async-event-driven-csharp-network
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # -----------------------------------------------------------------------
+  # Order Service — ASP.NET Core Minimal API (producer).
+  # Exposes POST /orders and GET /orders on port 3001 inside the network.
+  # -----------------------------------------------------------------------
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-csharp-order
+    environment:
+      # Point to the internal Kafka listener so service-to-service traffic stays on the overlay network.
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+    ports:
+      # 3021 on the host → 3001 inside the container to avoid conflict with TS (3001) and Java (3011).
+      - "3021:3001"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - 2-async-event-driven-csharp-network
+
+  # -----------------------------------------------------------------------
+  # Inventory Service — BackgroundService Kafka consumer (group: inventory-consumer).
+  # -----------------------------------------------------------------------
+  inventory-service:
+    build:
+      context: ./inventory-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-csharp-inventory
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - 2-async-event-driven-csharp-network
+
+  # -----------------------------------------------------------------------
+  # Notification Service — BackgroundService Kafka consumer (group: notification-consumer).
+  # -----------------------------------------------------------------------
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-csharp-notification
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - 2-async-event-driven-csharp-network
+
+networks:
+  # Isolated bridge network so this stack does not collide with TS or Java stacks.
+  2-async-event-driven-csharp-network:
+    driver: bridge
+    name: 2-async-event-driven-csharp-network

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>notification-service</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Confluent.Kafka for IConsumer<TKey, TValue> -->
+    <PackageReference Include="Confluent.Kafka" Version="2.4.0" />
+    <!-- Generic Host plumbing (BackgroundService) -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

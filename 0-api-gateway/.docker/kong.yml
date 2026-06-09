@@ -1,0 +1,26 @@
+# kong.yml — Kong DB-less declarative config: the routing map.
+# Kong loads this file at startup (KONG_DATABASE=off, KONG_DECLARATIVE_CONFIG=/kong/kong.yml).
+# Each `service` points at an internal Docker-network address; each `route` matches a
+# public path prefix. Client only knows :8000; internal hosts are never exposed.
+_format_version: "3.0"
+services:
+  - name: user-service
+    # Internal Docker network hostname + port for the user NestJS service.
+    url: http://user-service:3001
+    routes:
+      - name: users
+        # strip_path: false → Kong forwards /users unchanged; @Controller("users") handles it.
+        paths: ["/users"]
+        strip_path: false
+  - name: product-service
+    url: http://product-service:3002
+    routes:
+      - name: products
+        paths: ["/products"]
+        strip_path: false
+  - name: order-service
+    url: http://order-service:3003
+    routes:
+      - name: orders
+        paths: ["/orders"]
+        strip_path: false

@@ -1,0 +1,104 @@
+# Docker Compose — Java/Spring Boot stack for lesson `2-asynchronous-event-driven`.
+# (EN: Docker Compose — Java/Spring Boot stack for lesson `2-asynchronous-event-driven`.)
+#
+# Kafka KRaft + 3 Spring Boot services: order-service (producer), inventory-service/notification-service (consumers).
+# BUILD LOCAL — không dùng DockerHub image (SD rule S4: microservices-docker = build local).
+#
+# Thư mục làm việc: 2-asynchronous-event-driven/1-java/
+# (EN: Working directory: 2-asynchronous-event-driven/1-java/)
+#
+# Khởi chạy:
+#   cd 2-asynchronous-event-driven/1-java && docker compose up -d --build
+#
+# Dọn dẹp:
+#   docker compose down -v
+# =============================================================================
+
+name: 2-async-event-driven-java
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka (KRaft mode — không cần Zookeeper).
+  # (EN: Kafka in KRaft mode — no Zookeeper required.)
+  # ──────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 2-async-event-driven-java-kafka
+    environment:
+      KAFKA_CLUSTER_ID: starci-kafka-cluster-java
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      # Kafka broker port for clients (use 9093 to avoid conflict with TS stack on 9092)
+      - "9093:9092"
+    networks:
+      - 2-async-event-driven-java-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service (Producer) — Spring Boot REST API.
+  # (EN: Order Service (Producer) — Spring Boot REST API.)
+  # ──────────────────────────────────────────────
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-java-order
+    ports:
+      # Host 3011 → container 3001 (avoids conflict with TS stack on 3001)
+      - "3011:3001"
+    environment:
+      # Kafka broker address inside the Compose network
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PORT: "3001"
+    depends_on:
+      - kafka
+    networks:
+      - 2-async-event-driven-java-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Consumer — group inventory-consumer.
+  # (EN: Inventory Consumer — group inventory-consumer.)
+  # ──────────────────────────────────────────────
+  inventory-service:
+    build:
+      context: ./inventory-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-java-inventory
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 2-async-event-driven-java-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Notification Consumer — group notification-consumer.
+  # (EN: Notification Consumer — group notification-consumer.)
+  # ──────────────────────────────────────────────
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-java-notification
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 2-async-event-driven-java-network
+    restart: unless-stopped
+
+networks:
+  2-async-event-driven-java-network:
+    driver: bridge
+    name: 2-async-event-driven-java-network

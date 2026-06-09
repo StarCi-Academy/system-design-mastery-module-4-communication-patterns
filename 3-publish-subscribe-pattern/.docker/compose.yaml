@@ -1,0 +1,151 @@
+# Kiến trúc: Stack Docker lesson: publish subscribe pattern.
+# (EN: Docker stack for lesson: publish subscribe pattern.)
+#
+# Demo: HTTP API cổng 3001 (publisher); xem README module.
+#
+# Thư mục làm việc: 3-publish-subscribe-pattern/.docker
+# (EN: Working directory: 3-publish-subscribe-pattern/.docker)
+#
+# Khởi chạy stack:
+# (EN: Start stack:)
+#   cd 3-publish-subscribe-pattern/.docker && docker compose up -d --build
+#
+# Xem log:
+# (EN: View logs:)
+#   docker compose logs -f
+#
+# Dọn dẹp:
+# (EN: Cleanup:)
+#   docker compose down -v
+#
+# Docker Compose — lesson `3-publish-subscribe-pattern`
+# (NATS Server + 1 publisher + 3 subscribers: Analytics, Audit, Notification).
+# (EN: Docker Compose — lesson `3-publish-subscribe-pattern`
+# (NATS Server + 1 publisher + 3 subscribers: Analytics, Audit, Notification).)
+#
+# Làm việc trong thư mục chứa file này: `.../3-publish-subscribe-pattern/.docker/`
+# (EN: Run commands from this file's directory: `.../3-publish-subscribe-pattern/.docker/`)
+#
+# Compose tự tạo network `3-publish-subscribe-pattern` khi `up`
+# (không cần `docker network create`).
+# (EN: Compose creates network `3-publish-subscribe-pattern` on `up`
+# (no manual `docker network create`).)
+#
+# Khởi chạy nền:
+# (EN: Start detached:)
+#     docker compose up -d --build
+#
+# Xem log subscriber:
+# (EN: Tail subscriber logs:)
+#     docker compose logs -f subscriber-analytics subscriber-audit subscriber-notification
+#
+# Dừng và gỡ container + volume:
+# (EN: Stop/remove containers + volumes:)
+#     docker compose down -v
+# =============================================================================
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 3-publish-subscribe-pattern
+
+services:
+  # ──────────────────────────────────────────────
+  # NATS Server — message broker fire-and-forget tốc độ cao.
+  # (EN: NATS Server — high-speed fire-and-forget message broker.)
+  # ──────────────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    container_name: nats
+    ports:
+      # Client connection port.
+      - "4222:4222"
+      # HTTP monitoring port.
+      - "8222:8222"
+      # Cluster route port (multi-node).
+      - "6222:6222"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Publisher Service — REST API nhận POST /publish, emit event tới NATS.
+  # (EN: Publisher Service — REST API for POST /publish, emits event to NATS.)
+  # ──────────────────────────────────────────────
+  publisher-service:
+    build:
+      # Build từ Dockerfile trong thư mục service.
+      # (EN: Build from Dockerfile in service directory.)
+      context: ../publisher-service
+      dockerfile: Dockerfile
+    container_name: publisher-service
+    ports:
+      # REST API cho client gọi publish event.
+      # (EN: REST API for client to publish events.)
+      # Host 3001 → container 3001 (đổi sang port khác nếu 3001 bị conflict trên máy).
+      # (EN: Host 3001 → container 3001 (change to another port if 3001 conflicts on host).)
+      - "3001:3001"
+    environment:
+      # Cổng HTTP mà service lắng nghe (khớp với EXPOSE trong Dockerfile).
+      # (EN: HTTP port the service listens on (matches EXPOSE in Dockerfile).)
+      PORT: 3001
+      # Địa chỉ NATS server trong mạng Compose.
+      # (EN: NATS server address inside Compose network.)
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Subscriber Analytics — nhận event `app.events`, cập nhật analytics/metrics.
+  # (EN: Subscriber Analytics — receives `app.events`, updates analytics/metrics.)
+  # ──────────────────────────────────────────────
+  subscriber-analytics:
+    build:
+      # Build từ Dockerfile trong thư mục service.
+      # (EN: Build from Dockerfile in service directory.)
+      context: ../subscriber-analytics
+      dockerfile: Dockerfile
+    container_name: subscriber-analytics
+    environment:
+      # Địa chỉ NATS server trong mạng Compose.
+      # (EN: NATS server address inside Compose network.)
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Subscriber Audit — nhận event `app.events`, ghi vào audit log.
+  # (EN: Subscriber Audit — receives `app.events`, writes to audit log.)
+  # ──────────────────────────────────────────────
+  subscriber-audit:
+    build:
+      # Build từ Dockerfile trong thư mục service.
+      # (EN: Build from Dockerfile in service directory.)
+      context: ../subscriber-audit
+      dockerfile: Dockerfile
+    container_name: subscriber-audit
+    environment:
+      # Địa chỉ NATS server trong mạng Compose.
+      # (EN: NATS server address inside Compose network.)
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Subscriber Notification — nhận event `app.events`, gửi email/push.
+  # (EN: Subscriber Notification — receives `app.events`, sends email/push.)
+  # ──────────────────────────────────────────────
+  subscriber-notification:
+    build:
+      # Build từ Dockerfile trong thư mục service.
+      # (EN: Build from Dockerfile in service directory.)
+      context: ../subscriber-notification
+      dockerfile: Dockerfile
+    container_name: subscriber-notification
+    environment:
+      # Địa chỉ NATS server trong mạng Compose.
+      # (EN: NATS server address inside Compose network.)
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped

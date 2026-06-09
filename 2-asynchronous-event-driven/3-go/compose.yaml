@@ -1,0 +1,132 @@
+# Docker Compose stack for the Go track of lesson 2-asynchronous-event-driven.
+# All images are built locally from source (SD rule S4 — no DockerHub images for app services).
+# Host ports are offset to avoid conflicts with other language stacks:
+#   Kafka:         9095 → 9092  (TS=9092, Java=9093, C#=9094, Go=9095)
+#   Order service: 3031 → 3001  (TS=3001, Java=3011, C#=3021, Go=3031)
+
+name: 2-async-event-driven-go
+
+services:
+  # -----------------------------------------------------------------------
+  # Kafka broker — KRaft mode (no ZooKeeper), single-node for development.
+  # Uses the official apache/kafka image (well-known infra image, SD rule OK).
+  # -----------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 2-async-event-driven-go-kafka
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # Three listeners: PLAINTEXT for inter-container, CONTROLLER for KRaft, EXTERNAL for host.
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://localhost:9095"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # Auto-create topic order-events on first produce.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      CLUSTER_ID: "go-async-event-demo-0001"
+    ports:
+      # Expose external listener on host port 9095.
+      - "9095:9094"
+    networks:
+      - 2-async-event-driven-go-network
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # -----------------------------------------------------------------------
+  # kafka-init: Creates the order-events topic before any app service starts.
+  # This avoids a race condition where a consumer subscribes before the topic
+  # exists and gets an empty partition assignment (segmentio/kafka-go issue).
+  # -----------------------------------------------------------------------
+  kafka-init:
+    image: apache/kafka:3.8.0
+    container_name: 2-async-event-driven-go-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic order-events \
+          --partitions 1 \
+          --replication-factor 1
+        echo "Topic order-events created"
+    networks:
+      - 2-async-event-driven-go-network
+
+  # -----------------------------------------------------------------------
+  # Order Service — net/http producer (Go).
+  # -----------------------------------------------------------------------
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-go-order
+    environment:
+      # Use the internal PLAINTEXT listener for service-to-service traffic.
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+    ports:
+      # 3031 on the host → 3001 inside the container.
+      - "3031:3001"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - 2-async-event-driven-go-network
+
+  # -----------------------------------------------------------------------
+  # Inventory Service — segmentio/kafka-go Reader (group: inventory-consumer).
+  # -----------------------------------------------------------------------
+  inventory-service:
+    build:
+      context: ./inventory-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-go-inventory
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - 2-async-event-driven-go-network
+
+  # -----------------------------------------------------------------------
+  # Notification Service — segmentio/kafka-go Reader (group: notification-consumer).
+  # -----------------------------------------------------------------------
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: 2-async-event-driven-go-notification
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - 2-async-event-driven-go-network
+
+networks:
+  # Isolated bridge network so this stack does not collide with other language stacks.
+  2-async-event-driven-go-network:
+    driver: bridge
+    name: 2-async-event-driven-go-network

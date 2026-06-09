@@ -1,0 +1,119 @@
+# CQRS Pattern — C# track.
+# Write Model (PostgreSQL) + Read Model (Elasticsearch).
+# RabbitMQ synchronizes events from Write Service to Read Service.
+#
+# Working directory: 6-cqrs-and-read-models/2-csharp/.docker
+#
+# Start:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f cqrs-write-service-cs cqrs-read-service-cs
+#
+# Cleanup:
+#   docker compose down -v
+
+name: 6-cqrs-and-read-models-csharp
+
+services:
+  # RabbitMQ — message broker syncing events from write → read.
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: 6-cqrs-and-read-models-csharp-rabbitmq
+    ports:
+      # AMQP port — distinct from TS track (5672) by using 5674.
+      - "5674:5672"
+      # Management UI at http://localhost:15674.
+      - "15674:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - 6-cqrs-and-read-models-csharp
+    restart: unless-stopped
+
+  # PostgreSQL — Write Model database (EF Core).
+  postgres-cqrs-write-cs:
+    image: postgres:16-alpine
+    container_name: 6-cqrs-and-read-models-csharp-postgres
+    environment:
+      POSTGRES_USER: cqrs
+      POSTGRES_PASSWORD: cqrs
+      POSTGRES_DB: cqrs_write
+    ports:
+      # Host port 5435 avoids collision with TS track (5433).
+      - "5435:5432"
+    volumes:
+      - pg_cqrs_write_cs:/var/lib/postgresql/data
+    networks:
+      - 6-cqrs-and-read-models-csharp
+    restart: unless-stopped
+
+  # Elasticsearch — Read Model database (denormalized view).
+  elasticsearch-cs:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: 6-cqrs-and-read-models-csharp-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      # Host port 9201 avoids collision with TS track (9200).
+      - "9201:9200"
+    volumes:
+      - es_cqrs_data_cs:/usr/share/elasticsearch/data
+    networks:
+      - 6-cqrs-and-read-models-csharp
+    restart: unless-stopped
+
+  # Write Service — receives POST commands, persists to PostgreSQL, emits events to RabbitMQ.
+  cqrs-write-service-cs:
+    build:
+      context: ../write-service
+      dockerfile: Dockerfile
+    container_name: 6-cqrs-and-read-models-csharp-write
+    ports:
+      # Host port 3010 avoids collision with TS track (3000).
+      - "3010:3000"
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      WRITE_DB_HOST: postgres-cqrs-write-cs
+      WRITE_DB_PORT: "5432"
+      WRITE_DB_USER: cqrs
+      WRITE_DB_PASSWORD: cqrs
+      WRITE_DB_NAME: cqrs_write
+      PORT: "3000"
+    depends_on:
+      - rabbitmq
+      - postgres-cqrs-write-cs
+    networks:
+      - 6-cqrs-and-read-models-csharp
+    restart: unless-stopped
+
+  # Read Service — consumes RabbitMQ events, indexes to Elasticsearch, serves GET queries.
+  cqrs-read-service-cs:
+    build:
+      context: ../read-service
+      dockerfile: Dockerfile
+    container_name: 6-cqrs-and-read-models-csharp-read
+    ports:
+      # Host port 3011 avoids collision with TS track (3001).
+      - "3011:3001"
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ELASTICSEARCH_NODE: http://elasticsearch-cs:9200
+      PORT: "3001"
+    depends_on:
+      - rabbitmq
+      - elasticsearch-cs
+    networks:
+      - 6-cqrs-and-read-models-csharp
+    restart: unless-stopped
+
+volumes:
+  pg_cqrs_write_cs: {}
+  es_cqrs_data_cs: {}
+
+networks:
+  6-cqrs-and-read-models-csharp:
+    name: 6-cqrs-and-read-models-csharp

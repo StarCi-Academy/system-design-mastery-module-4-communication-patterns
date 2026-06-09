@@ -1,0 +1,87 @@
+# Docker Compose — lesson `3-publish-subscribe-pattern` (Java/Spring Boot track)
+# (NATS Server + 1 publisher + 3 subscribers: Analytics, Notification, Audit).
+#
+# Working directory: 3-publish-subscribe-pattern/1-java/.docker
+# Start stack:
+#   cd 3-publish-subscribe-pattern/1-java/.docker && docker compose up -d --build
+# Cleanup:
+#   docker compose down -v
+
+name: 3-pubsub-java
+
+services:
+  # ──────────────────────────────────────────────
+  # NATS Server — high-speed fire-and-forget message broker.
+  # ──────────────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    container_name: java-nats
+    ports:
+      # Client connection port — mapped to 4232 to avoid conflict with TS stack (4222).
+      - "4232:4222"
+      # HTTP monitoring port — mapped to 8232 to avoid conflict with TS stack (8222).
+      - "8232:8222"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Publisher Service — REST API for POST /events, emits event to NATS subject app.events.
+  # ──────────────────────────────────────────────
+  publisher-service:
+    build:
+      context: ../publisher-service
+      dockerfile: Dockerfile
+    container_name: java-publisher-service
+    ports:
+      # REST API for client to publish events — mapped to 3012 to avoid conflict with TS stack (3001).
+      - "3012:3001"
+    environment:
+      # NATS server address inside the Compose network.
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Subscriber Analytics — receives app.events, updates analytics/metrics.
+  # ──────────────────────────────────────────────
+  subscriber-analytics:
+    build:
+      context: ../subscriber-analytics
+      dockerfile: Dockerfile
+    container_name: java-subscriber-analytics
+    environment:
+      # NATS server address inside the Compose network.
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Subscriber Notification — receives app.events, sends email/push.
+  # ──────────────────────────────────────────────
+  subscriber-notification:
+    build:
+      context: ../subscriber-notification
+      dockerfile: Dockerfile
+    container_name: java-subscriber-notification
+    environment:
+      # NATS server address inside the Compose network.
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Subscriber Audit — receives app.events, writes to audit log.
+  # ──────────────────────────────────────────────
+  subscriber-audit:
+    build:
+      context: ../subscriber-audit
+      dockerfile: Dockerfile
+    container_name: java-subscriber-audit
+    environment:
+      # NATS server address inside the Compose network.
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - nats
+    restart: unless-stopped

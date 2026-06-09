@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- MongoDB .NET Driver — maps Product documents to `products` collection. -->
+    <PackageReference Include="MongoDB.Driver" Version="2.28.0" />
+    <!-- Confluent Kafka client — consumes `order-events` topic. -->
+    <PackageReference Include="Confluent.Kafka" Version="2.5.0" />
+  </ItemGroup>
+
+</Project>

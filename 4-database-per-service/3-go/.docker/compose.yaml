@@ -1,0 +1,164 @@
+# ──────────────────────────────────────────────
+# Database Per Service — Go track.
+# Order Service: net/http + pgx (PostgreSQL) + segmentio/kafka-go (producer).
+# Inventory Service: net/http + mongo-go-driver (MongoDB) + segmentio/kafka-go (consumer).
+# Kafka transports ORDER_CREATED events between the two services.
+#
+# Working directory:
+#   cd system-design-mastery-module-4-communication-patterns/4-database-per-service/3-go/.docker
+#
+# Start:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f order-service inventory-service
+#
+# Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Compose project name — isolated from the TS track (4-database-per-service).
+name: 4-database-per-service-go
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka KRaft broker — Apache Kafka 3.8, no Zookeeper.
+  # ──────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 4-dbps-go-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Fixed cluster ID for dev — avoids re-format on every up.
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      # Host 9192 avoids collision with the TS track's 9092.
+      - "9192:9092"
+    networks:
+      - 4-database-per-service-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — web console for topics / messages.
+  # ──────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: 4-dbps-go-kafka-ui
+    ports:
+      # Host 8180 avoids collision with the TS track's 8080.
+      - "8180:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 4-database-per-service-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — persistence for Order Service (pgx).
+  # ──────────────────────────────────────────────
+  postgres-order:
+    image: postgres:16-alpine
+    container_name: 4-dbps-go-postgres-order
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: order
+      POSTGRES_DB: order_db
+    ports:
+      # Host 5532 avoids collision with the TS track's 5432.
+      - "5532:5432"
+    volumes:
+      - pg_order_data_go:/var/lib/postgresql/data
+    networks:
+      - 4-database-per-service-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # MongoDB — persistence for Inventory Service (mongo-go-driver).
+  # ──────────────────────────────────────────────
+  mongo-inventory:
+    image: mongo:7
+    container_name: 4-dbps-go-mongo-inventory
+    ports:
+      # Host 27117 avoids collision with the TS track's 27017.
+      - "27117:27017"
+    volumes:
+      - mongo_inventory_data_go:/data/db
+    networks:
+      - 4-database-per-service-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service — Go: REST API, persists to Postgres, emits Kafka event.
+  # ──────────────────────────────────────────────
+  order-service:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    container_name: 4-dbps-go-order-service
+    ports:
+      # Host 3011 avoids collision with the TS track's 3001.
+      - "3011:3011"
+    environment:
+      PORT: "3011"
+      KAFKA_BROKERS: kafka:9092
+      ORDER_DB_HOST: postgres-order
+      ORDER_DB_PORT: "5432"
+      ORDER_DB_USER: order
+      ORDER_DB_PASSWORD: order
+      ORDER_DB_NAME: order_db
+    depends_on:
+      - kafka
+      - postgres-order
+    networks:
+      - 4-database-per-service-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Service — Go: Kafka consumer + REST API backed by MongoDB.
+  # ──────────────────────────────────────────────
+  inventory-service:
+    build:
+      context: ../inventory-service
+      dockerfile: Dockerfile
+    container_name: 4-dbps-go-inventory-service
+    ports:
+      # Host 3012 avoids collision with the TS track's 3002.
+      - "3012:3012"
+    environment:
+      PORT: "3012"
+      KAFKA_BROKERS: kafka:9092
+      INVENTORY_MONGO_URI: mongodb://mongo-inventory:27017/inventory_db
+    depends_on:
+      - kafka
+      - mongo-inventory
+    networks:
+      - 4-database-per-service-go-network
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Volumes — persistent data for PostgreSQL and MongoDB.
+# ──────────────────────────────────────────────
+volumes:
+  pg_order_data_go: {}
+  mongo_inventory_data_go: {}
+
+# ──────────────────────────────────────────────
+# Network — isolated bridge; name unique to this lang track.
+# ──────────────────────────────────────────────
+networks:
+  4-database-per-service-go-network:
+    driver: bridge
+    name: 4-database-per-service-go-network

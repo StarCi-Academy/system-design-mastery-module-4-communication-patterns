@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Worker SDK: produces a console app backed by a .NET Generic Host -->
+    <AssemblyName>inventory-service</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Confluent.Kafka for IConsumer<TKey, TValue> -->
+    <PackageReference Include="Confluent.Kafka" Version="2.4.0" />
+    <!-- Generic Host plumbing (BackgroundService) -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

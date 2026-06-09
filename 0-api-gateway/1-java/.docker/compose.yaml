@@ -1,0 +1,72 @@
+# Docker Compose — lesson `0-api-gateway` Java track.
+# (EN: Builds and runs the Spring Boot API Gateway + 3 Spring Boot micro-services.)
+#
+# Working directory: 0-api-gateway/1-java/.docker
+#
+# Start stack:
+#   cd 0-api-gateway/1-java/.docker && docker compose up -d --build
+#
+# Cleanup:
+#   docker compose down -v
+
+name: 0-api-gateway-java
+
+services:
+  # API Gateway — Spring Boot reverse proxy on port 8000.
+  # Proxies /users → user-service:3001, /products → product-service:3002, /orders → order-service:3003.
+  api-gateway:
+    build:
+      context: ../api-gateway
+      dockerfile: Dockerfile
+    container_name: 0-api-gateway-java-gateway
+    ports:
+      # Map host 8000 → container 8000 (single client-facing entry point).
+      - "8000:8000"
+    networks:
+      - 0-api-gateway-java
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+    restart: unless-stopped
+
+  # User Service — Spring Boot on port 3001, internal only.
+  user-service:
+    build:
+      context: ../user-service
+      dockerfile: Dockerfile
+    container_name: 0-api-gateway-java-user
+    ports:
+      # Map host 3001 → container 3001 for Flow 4 direct comparison.
+      - "3001:3001"
+    networks:
+      - 0-api-gateway-java
+    restart: unless-stopped
+
+  # Product Service — Spring Boot on port 3002, internal only.
+  product-service:
+    build:
+      context: ../product-service
+      dockerfile: Dockerfile
+    container_name: 0-api-gateway-java-product
+    ports:
+      - "3002:3002"
+    networks:
+      - 0-api-gateway-java
+    restart: unless-stopped
+
+  # Order Service — Spring Boot on port 3003, internal only.
+  order-service:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    container_name: 0-api-gateway-java-order
+    ports:
+      - "3003:3003"
+    networks:
+      - 0-api-gateway-java
+    restart: unless-stopped
+
+networks:
+  0-api-gateway-java:
+    name: 0-api-gateway-java

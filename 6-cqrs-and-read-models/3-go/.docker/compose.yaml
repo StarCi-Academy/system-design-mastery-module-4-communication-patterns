@@ -1,0 +1,119 @@
+# ──────────────────────────────────────────────
+# CQRS Pattern — Go track.
+# Write Model: PostgreSQL (pgx).  Read Model: Elasticsearch (go-elasticsearch).
+# Event bus: RabbitMQ (rabbitmq/amqp091-go).
+# Write Service persists to PostgreSQL + publishes customer.profile.updated to RabbitMQ.
+# Read Service consumes from RabbitMQ + projects into Elasticsearch + serves GET queries.
+#
+# Working directory:
+#   cd .repo/system-design-mastery-module-3-communication-patterns/6-cqrs-and-read-models/3-go/.docker
+#
+# Start:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f cqrs-write-service-go cqrs-read-service-go
+#
+# Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Compose project name — unique per lang track to avoid container name collisions with the TS track.
+name: 6-cqrs-and-read-models-go
+
+services:
+  # ── RabbitMQ — message broker syncing events write → read ────────────
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-cqrs-go
+    ports:
+      # Host :5675 avoids colliding with the TS/Java/C# tracks.
+      - "5675:5672"
+      - "15675:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    restart: unless-stopped
+
+  # ── PostgreSQL — Write Model ──────────────────────────────────────────
+  postgres-cqrs-write-go:
+    image: postgres:16-alpine
+    container_name: postgres-cqrs-write-go
+    environment:
+      POSTGRES_USER: cqrs
+      POSTGRES_PASSWORD: cqrs
+      POSTGRES_DB: cqrs_write
+    ports:
+      # Host :5435 avoids colliding with TS track's :5433.
+      - "5435:5432"
+    volumes:
+      - pg_cqrs_write_go:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ── Elasticsearch — Read Model (denormalized view) ───────────────────
+  elasticsearch-go:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: elasticsearch-cqrs-go
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      # Host :9202 avoids colliding with TS (:9200) and Java/C# (:9201).
+      - "9202:9200"
+    volumes:
+      - es_cqrs_data_go:/usr/share/elasticsearch/data
+    restart: unless-stopped
+
+  # ── Write Service — POST /customer/update ────────────────────────────
+  cqrs-write-service-go:
+    build:
+      context: ../write-service
+    container_name: cqrs-write-service-go
+    ports:
+      # Host :3010 — distinct from TS track's :3000.
+      - "3010:3000"
+    environment:
+      # PostgreSQL (Write Model)
+      WRITE_DB_HOST: postgres-cqrs-write-go
+      WRITE_DB_PORT: "5432"
+      WRITE_DB_USER: cqrs
+      WRITE_DB_PASSWORD: cqrs
+      WRITE_DB_NAME: cqrs_write
+      # RabbitMQ
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      PORT: "3000"
+    depends_on:
+      - rabbitmq
+      - postgres-cqrs-write-go
+    restart: unless-stopped
+
+  # ── Read Service — GET /customer/:id ────────────────────────────────
+  cqrs-read-service-go:
+    build:
+      context: ../read-service
+    container_name: cqrs-read-service-go
+    ports:
+      # Host :3011 — distinct from TS track's :3001.
+      - "3011:3001"
+    environment:
+      # Elasticsearch (Read Model)
+      ELASTICSEARCH_NODE: http://elasticsearch-go:9200
+      # RabbitMQ
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      PORT: "3001"
+    depends_on:
+      - rabbitmq
+      - elasticsearch-go
+    restart: unless-stopped
+
+# ── Volumes ───────────────────────────────────────────────────────────
+volumes:
+  pg_cqrs_write_go: {}
+  es_cqrs_data_go: {}
+
+# ── Network ───────────────────────────────────────────────────────────
+# Compose-managed bridge network; name is unique per lang track.
+networks:
+  default:
+    name: 6-cqrs-and-read-models-go

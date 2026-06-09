@@ -1,0 +1,197 @@
+# ──────────────────────────────────────────────
+# Saga Pattern — Go track (3-go).
+# Three services: order-service (PostgreSQL), payment-service (PostgreSQL),
+# inventory-service (MongoDB). All communicate via a single Kafka topic
+# "saga.demo.events" using the choreography pattern.
+#
+# Working directory:
+#   cd .repo/system-design-mastery-module-3-communication-patterns/5-saga-orchestration-and-choreography/3-go/.docker
+#
+# Start:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f saga-go-order saga-go-payment saga-go-inventory
+#
+# Cleanup:
+#   docker compose down -v
+# ──────────────────────────────────────────────
+
+# Compose project name — unique per lang track to avoid collision with TS stack.
+name: 5-saga-orchestration-and-choreography-go
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka KRaft — broker for saga event bus.
+  # ──────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: 5-saga-go-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      # Distinct host port (9192) so it does not clash with the TS track on 9092.
+      - "9192:9092"
+    # Healthcheck so app services start only after the broker (and the internal
+    # __consumer_offsets topic / group coordinator) is actually ready. Without
+    # this, a consumer that joins during the broker's cold start can silently
+    # stall its first group-join and miss the opening saga events.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+    networks:
+      - 5-saga-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — web interface for topic/message management.
+  # ──────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: 5-saga-go-kafka-ui
+    ports:
+      # Distinct host port (8180) to avoid clashing with TS track on 8080.
+      - "8180:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - 5-saga-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — shared instance, two databases (orders, payments).
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: 5-saga-go-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # init-db.sh creates both databases on first boot.
+      POSTGRES_MULTIPLE_DATABASES: orders,payments
+    volumes:
+      - saga_go_postgres:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    ports:
+      # Distinct host port (5532) to avoid clashing with any host Postgres on 5432.
+      - "5532:5432"
+    networks:
+      - 5-saga-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # MongoDB — inventory products + fulfillments.
+  # ──────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: 5-saga-go-mongo
+    volumes:
+      - saga_go_mongo:/data/db
+    ports:
+      # Distinct host port (27118) to avoid clashing with any host Mongo on 27017.
+      - "27118:27017"
+    networks:
+      - 5-saga-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Order Service — REST POST /order, persists to PostgreSQL, emits ORDER_CREATED.
+  # ──────────────────────────────────────────────
+  saga-go-order:
+    build:
+      context: ../order-service
+    container_name: 5-saga-go-order
+    ports:
+      # REST API at http://localhost:3011 (distinct from TS track on 3001).
+      - "3011:3001"
+    environment:
+      PORT: "3001"
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_DSN: "postgres://postgres:postgres@postgres:5432/orders?sslmode=disable"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_started
+    networks:
+      - 5-saga-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Payment Service — consumes ORDER_CREATED, captures payment, emits PAYMENT_CAPTURED / PAYMENT_REFUNDED.
+  # ──────────────────────────────────────────────
+  saga-go-payment:
+    build:
+      context: ../payment-service
+    container_name: 5-saga-go-payment
+    ports:
+      # Health endpoint at http://localhost:3012 (distinct from TS track on 3002).
+      - "3012:3002"
+    environment:
+      PORT: "3002"
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_DSN: "postgres://postgres:postgres@postgres:5432/payments?sslmode=disable"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_started
+    networks:
+      - 5-saga-go-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Inventory Service — consumes PAYMENT_CAPTURED, decrements MongoDB stock,
+  # emits INVENTORY_OK or INVENTORY_OUT_OF_STOCK.
+  # ──────────────────────────────────────────────
+  saga-go-inventory:
+    build:
+      context: ../inventory-service
+    container_name: 5-saga-go-inventory
+    ports:
+      # GET /stock at http://localhost:3013 (distinct from TS track on 3003).
+      - "3013:3003"
+    environment:
+      PORT: "3003"
+      KAFKA_BROKERS: kafka:9092
+      MONGO_URI: "mongodb://mongo:27017"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+    networks:
+      - 5-saga-go-network
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────
+# Volumes — persistent data stores.
+# ──────────────────────────────────────────────
+volumes:
+  saga_go_postgres: {}
+  saga_go_mongo: {}
+
+# ──────────────────────────────────────────────
+# Network — isolated bridge; name unique per lang track.
+# ──────────────────────────────────────────────
+networks:
+  5-saga-go-network:
+    driver: bridge
+    name: 5-saga-go-network

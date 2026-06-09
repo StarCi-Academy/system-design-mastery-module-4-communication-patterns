@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Produce a self-contained binary suitable for Alpine Docker images -->
+    <AssemblyName>order-service</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Confluent.Kafka for KafkaProducer (IProducer<TKey, TValue>) -->
+    <PackageReference Include="Confluent.Kafka" Version="2.4.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,114 @@
+# Docker Compose — lesson `0-api-gateway` (Kong Gateway DB-less + 3 NestJS services).
+# (EN: Kong runs DB-less mode; routing config loaded from kong.yml at startup.)
+#
+# Thư mục làm việc: 0-api-gateway/.docker
+# (EN: Working directory: 0-api-gateway/.docker)
+#
+# Khởi chạy stack:
+# (EN: Start stack:)
+#   cd 0-api-gateway/.docker && docker compose up -d --build
+#
+# Xem log:
+# (EN: View logs:)
+#   docker compose logs -f
+#
+# Dọn dẹp:
+# (EN: Cleanup:)
+#   docker compose down -v
+
+# Tiền tố project Compose (tên stack / tiền tố container).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 0-api-gateway
+
+services:
+  # Kong Gateway — reverse proxy chính, chạy DB-less, nạp route từ kong.yml.
+  # (EN: Kong Gateway — main reverse proxy, DB-less mode, routes loaded from kong.yml.)
+  kong:
+    image: kong:3.6-ubuntu
+    # DB-less: KONG_DATABASE=off + KONG_DECLARATIVE_CONFIG trỏ tới file kong.yml.
+    # (EN: DB-less: set KONG_DATABASE=off and point KONG_DECLARATIVE_CONFIG at kong.yml.)
+    environment:
+      KONG_DATABASE: "off"
+      # Đường dẫn nội bộ container trỏ tới file config được mount.
+      # (EN: Internal container path pointing to the mounted config file.)
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+    volumes:
+      # Mount file kong.yml từ thư mục .docker (sibling) vào /kong/ trong container.
+      # (EN: Mount kong.yml from .docker directory into /kong/ inside the container.)
+      - ./kong.yml:/kong/kong.yml:ro
+    ports:
+      # Ánh xạ cổng host 8000 → Kong Proxy (client traffic).
+      # (EN: Map host port 8000 → Kong Proxy (client traffic).)
+      - "8000:8000"
+      # Ánh xạ cổng host 8001 → Kong Admin API (cấu hình routing).
+      # (EN: Map host port 8001 → Kong Admin API (routing configuration).)
+      - "8001:8001"
+    networks:
+      - 0-api-gateway
+    depends_on:
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    restart: unless-stopped
+
+  # User Service — NestJS backend, build local từ source.
+  # (EN: User Service — NestJS backend, built locally from source.)
+  user-service:
+    # Build local: image không pull từ registry, build tại chỗ khi `docker compose up --build`.
+    # (EN: Local build: image is not pulled from a registry; built in-place on `docker compose up --build`.)
+    build:
+      context: ../user-service
+      dockerfile: Dockerfile
+    container_name: 0-api-gateway-user-service
+    environment:
+      # Cổng container: khớp với EXPOSE 3001 trong Dockerfile.
+      # (EN: Container port: matches EXPOSE 3001 in Dockerfile.)
+      PORT: "3001"
+    ports:
+      # Ánh xạ host 3001 → container 3001 để Flow 4 so sánh gọi thẳng vs qua gateway.
+      # (EN: Map host 3001 → container 3001 so Flow 4 can compare direct vs gateway calls.)
+      - "3001:3001"
+    networks:
+      - 0-api-gateway
+    restart: unless-stopped
+
+  # Product Service — NestJS backend, build local từ source.
+  # (EN: Product Service — NestJS backend, built locally from source.)
+  product-service:
+    build:
+      context: ../product-service
+      dockerfile: Dockerfile
+    container_name: 0-api-gateway-product-service
+    environment:
+      PORT: "3002"
+    ports:
+      - "3002:3002"
+    networks:
+      - 0-api-gateway
+    restart: unless-stopped
+
+  # Order Service — NestJS backend, build local từ source.
+  # (EN: Order Service — NestJS backend, built locally from source.)
+  order-service:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    container_name: 0-api-gateway-order-service
+    environment:
+      PORT: "3003"
+    ports:
+      - "3003:3003"
+    networks:
+      - 0-api-gateway
+    restart: unless-stopped
+
+# Network do Compose tạo; name đặt tên trên Docker trùng lesson (không external).
+# (EN: Compose-managed network; name sets Docker network name to match lesson (not external).)
+networks:
+  0-api-gateway:
+    name: 0-api-gateway

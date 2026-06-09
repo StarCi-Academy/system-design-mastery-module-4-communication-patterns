@@ -1,0 +1,74 @@
+# Docker Compose — lesson `7-event-sourcing` C# track.
+# (EN: Builds and runs the ASP.NET Core Event Store Service + PostgreSQL.)
+#
+# Working directory: 7-event-sourcing/2-csharp/.docker
+#
+# Start stack:
+#   cd 7-event-sourcing/2-csharp/.docker && docker compose up -d --build
+#
+# View logs:
+#   docker compose logs -f
+#
+# Cleanup:
+#   docker compose down -v
+
+# Compose project name — distinct from the TypeScript track (name: 7-event-sourcing).
+name: 7-event-sourcing-csharp
+
+services:
+  # PostgreSQL — stores the event log (events table) and snapshots (account_snapshots table).
+  postgres:
+    image: postgres:16-alpine
+    container_name: 7-event-sourcing-csharp-postgres
+    environment:
+      POSTGRES_USER: eventsource
+      POSTGRES_PASSWORD: eventsource
+      POSTGRES_DB: event_store
+    ports:
+      # Host 5433 → container 5432 (avoids collision with the TS track on 5432).
+      - "5433:5432"
+    volumes:
+      # Named volume for data persistence across restarts.
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - 7-event-sourcing-csharp
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventsource -d event_store"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Event Store Service — ASP.NET Core 8 minimal API, built locally from source.
+  # Accepts commands (POST), appends events, returns projection (GET), supports replay/snapshot.
+  event-store-service:
+    build:
+      context: ../event-store-service
+      dockerfile: Dockerfile
+    container_name: 7-event-sourcing-csharp-event-store-service
+    environment:
+      PORT: "3000"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: eventsource
+      DB_PASSWORD: eventsource
+      DB_NAME: event_store
+    ports:
+      # Host 3010 → container 3000 (avoids collision with the TS track on 3000).
+      - "3010:3000"
+    networks:
+      - 7-event-sourcing-csharp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+# Named volume: persistent Postgres data (isolated from the TS track volume).
+volumes:
+  postgres-data:
+    name: 7-event-sourcing-csharp-postgres-data
+
+# Compose-managed network — name matches the project name for clarity.
+networks:
+  7-event-sourcing-csharp:
+    name: 7-event-sourcing-csharp

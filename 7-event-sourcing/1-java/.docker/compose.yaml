@@ -1,0 +1,82 @@
+# Docker Compose — lesson `7-event-sourcing` Java track.
+# (EN: Docker Compose — lesson `7-event-sourcing` Java track.)
+#
+# Working directory: 7-event-sourcing/1-java/.docker
+# (EN: Working directory: 7-event-sourcing/1-java/.docker)
+#
+# Start stack:
+# (EN: Start stack:)
+#   cd 7-event-sourcing/1-java/.docker && docker compose up -d --build
+#
+# View logs:
+# (EN: View logs:)
+#   docker compose logs -f
+#
+# Cleanup:
+# (EN: Cleanup:)
+#   docker compose down -v
+
+# Compose project prefix (stack / container name prefix).
+# (EN: Compose project prefix (stack / container name prefix).)
+name: 7-event-sourcing-java
+
+services:
+  # PostgreSQL — stores event log (events table) and snapshots (account_snapshots table).
+  # (EN: PostgreSQL — stores event log (events table) and snapshots (account_snapshots table).)
+  # Host port 5433 to avoid collision with the TS track which uses 5432.
+  postgres:
+    image: postgres:16-alpine
+    container_name: 7-event-sourcing-java-postgres
+    environment:
+      POSTGRES_USER: eventsource
+      POSTGRES_PASSWORD: eventsource
+      POSTGRES_DB: event_store
+    ports:
+      # Host 5433 → container 5432 (distinct from TS track on 5432).
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - 7-event-sourcing-java
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventsource -d event_store"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Event Store Service — Spring Boot 3, built locally from source.
+  # Accepts commands (POST), appends events, returns projection (GET), supports replay/snapshot.
+  # (EN: Event Store Service — Spring Boot 3, built locally from source.)
+  event-store-service:
+    build:
+      context: ../event-store-service
+      dockerfile: Dockerfile
+    container_name: 7-event-sourcing-java-event-store-service
+    environment:
+      PORT: "3000"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: eventsource
+      DB_PASSWORD: eventsource
+      DB_NAME: event_store
+      # DB_LOGGING: "true"   # Uncomment to see SQL queries in logs.
+    ports:
+      # Host 3100 → container 3000 (distinct from TS track on 3000).
+      - "3100:3000"
+    networks:
+      - 7-event-sourcing-java
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+# Named volume: persistent Postgres data.
+volumes:
+  postgres-data:
+    name: 7-event-sourcing-java-postgres-data
+
+# Compose-managed network; name matches lesson + language track (not external).
+networks:
+  7-event-sourcing-java:
+    name: 7-event-sourcing-java
